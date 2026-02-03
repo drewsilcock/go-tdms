@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"math/big"
-	"slices"
 	"time"
 )
 
@@ -112,45 +111,45 @@ func NewDataType(typeCode tdsDataType) (DataType, error) {
 	switch typeCode {
 	case tdsTypeVoid:
 		return &TDSVoid{}, nil
-	case tdsTypeI8:
+	case tdsTypeInt8:
 		return ptr(TDSInt8(0)), nil
-	case tdsTypeI16:
+	case tdsTypeInt16:
 		return ptr(TDSInt16(0)), nil
-	case tdsTypeI32:
+	case tdsTypeInt32:
 		return ptr(TDSInt32(0)), nil
-	case tdsTypeI64:
+	case tdsTypeInt64:
 		return ptr(TDSInt64(0)), nil
-	case tdsTypeU8:
+	case tdsTypeUint8:
 		return ptr(TDSUint8(0)), nil
-	case tdsTypeU16:
+	case tdsTypeUint16:
 		return ptr(TDSUint16(0)), nil
-	case tdsTypeU32:
+	case tdsTypeUint32:
 		return ptr(TDSUint32(0)), nil
-	case tdsTypeU64:
+	case tdsTypeUint64:
 		return ptr(TDSUint64(0)), nil
-	case tdsTypeSingleFloat:
+	case tdsTypeFloat32:
 		return ptr(TDSFloat32(0)), nil
-	case tdsTypeDoubleFloat:
+	case tdsTypeFloat64:
 		return ptr(TDSFloat64(0)), nil
-	case tdsTypeExtendedFloat:
-		return &TDSFloat128{}, nil
-	case tdsTypeSingleFloatWithUnit:
+	case tdsTypeFloat128:
+		return &Float128{}, nil
+	case tdsTypeFloat32WithUnit:
 		return ptr(TDSFloat32WithUnit(0)), nil
-	case tdsTypeDoubleFloatWithUnit:
+	case tdsTypeFloat64WithUnit:
 		return ptr(TDSFloat64WithUnit(0)), nil
-	case tdsTypeExtendedFloatWithUnit:
+	case tdsTypeFloat128WithUnit:
 		return &TDSFloat128WithUnit{}, nil
 	case tdsTypeString:
 		return ptr(TDSString("")), nil
 	case tdsTypeBoolean:
 		return ptr(TDSBool(false)), nil
-	case tdsTypeTimeStamp:
+	case tdsTypeTime:
 		return &TDSTime{}, nil
 	case tdsTypeFixedPoint:
 		return &TDSFixedPoint{}, nil
-	case tdsTypeComplexSingleFloat:
+	case tdsTypeComplex64:
 		return ptr(TDSComplexFloat32(0 + 0i)), nil
-	case tdsTypeComplexDoubleFloat:
+	case tdsTypeComplex128:
 		return ptr(TDSComplexFloat64(0 + 0i)), nil
 	case tdsTypeDAQmxRawData:
 		return &TDSDAQmxRawData{}, nil
@@ -343,88 +342,30 @@ func (t *TDSFloat64) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
 	return nil
 }
 
-type TDSFloat128 Float128
-
-func (t TDSFloat128) Size() int {
-	return 16
-}
-
-// While LabView can store extended precision float point numbers in various
-// different numbers of bits – 80,, 64, 96, and 128 being the most popular (see
-// https://www.ni.com/docs/en-US/bundle/labview/page/how-labview-stores-data-in-memory.html#d25545e113)
-// – however when written to TDMS file, it is standardised as a 128-bit IEEE extended-precision format
-// (https://www.ni.com/docs/en-US/bundle/labview/page/floating-point-numbers.html).
-func (t *TDSFloat128) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, t.Size())
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSFloat128(parseQuad(valBytes, byteOrder))
-	return nil
-}
-
-// Go's math.big.Float doesn't support NaN values.
+// When represented in memory, this type is always little endian. To get a
+// usable value, see `Float64()` and `BigFloat()`, depending on whether you need
+// the full precision or not.
 type Float128 [16]byte
 
 // Float64 converts the 128-bit extended precision float to a primitive float64.
 // This loses a significant amount of precision. To avoid losing any precision
 // at the cost of usability, see `BigFloat()`.
 func (f Float128) Float64() float64 {
-	return 0
+	result, _ := f.BigFloat().Float64()
+	return result
 }
 
-func NewFloat128(value *big.Float) Float128 {
-	return Float128{
-		value: new(big.Float).Set(value),
-		isNaN: false,
-	}
-}
-
-func (f *Float128) IsNaN() bool {
-	return f.isNaN
-}
-
-func (f *Float128) SetNaN() *Float128 {
-	f.isNaN = true
-	f.value = nil
-	return f
-}
-
-func (f *Float128) SetValue(value *big.Float) *Float128 {
-	f.isNaN = false
-	f.value = new(big.Float).Set(value)
-	return f
-}
-
-// GetValue returns the value of the Float128 as a big.Float. Although it
-// returns a pointer, changing it does not change the Float128 itself. To do
-// this, retrieve the big.Float, make any necessary changes and pass it back in
-// via `SetValue()`.
-func (f *Float128) GetValue() *big.Float {
-	if f.isNaN {
-		return nil
-	}
-	return new(big.Float).Set(f.value)
-}
-
-// parseQuad parses a 128-bit IEEE 754 quad precision float from 16 bytes.
-// The bytes should be in the specified byte order (big-endian or little-endian).
-func parseQuad(data []byte, order binary.ByteOrder) Float128 {
-	if order == binary.LittleEndian {
-		slices.Reverse(data)
-	}
-
+func (f Float128) BigFloat() *big.Float {
 	// Extract sign bit (bit 127)
-	sign := (data[0] >> 7) & 1
+	sign := (f[0] >> 7) & 1
 
 	// Extract exponent (bits 126-112, 15 bits total)
-	exponent := uint16(data[0]&0x7F) << 8
-	exponent |= uint16(data[1])
+	exponent := uint16(f[0]&0x7F) << 8
+	exponent |= uint16(f[1])
 
 	// Extract mantissa (bits 111-0, 112 bits)
 	mantissaBits := make([]byte, 14)
-	copy(mantissaBits, data[2:16])
+	copy(mantissaBits, f[2:16])
 
 	// Quad precision has 113 bits of precision according to IEEE
 	result := new(big.Float).SetPrec(113)
@@ -432,10 +373,10 @@ func parseQuad(data []byte, order binary.ByteOrder) Float128 {
 	// Handle special case of nan/inf
 	if exponent == 0x7FFF {
 		if isZeroMantissa(mantissaBits) {
-			result.SetInf(sign == 1)
-			return NewFloat128(result)
+			return result.SetInf(sign == 1)
 		} else {
-			return *new(Float128).SetNaN()
+			// big.Float can't handle NaN values.
+			return nil
 		}
 	}
 
@@ -444,8 +385,7 @@ func parseQuad(data []byte, order binary.ByteOrder) Float128 {
 	if exponent == 0 {
 		// Subnormal or zero
 		if isZeroMantissa(mantissaBits) {
-			result.SetInt64(0)
-			return NewFloat128(result)
+			return result.SetInt64(0)
 		}
 
 		// Subnormal number: exponent is -16382, implicit leading bit is 0
@@ -461,7 +401,7 @@ func parseQuad(data []byte, order binary.ByteOrder) Float128 {
 			result.Neg(result)
 		}
 
-		return NewFloat128(result)
+		return result
 	}
 
 	// Normal number: implicit leading bit is 1
@@ -484,7 +424,7 @@ func parseQuad(data []byte, order binary.ByteOrder) Float128 {
 		result.Neg(result)
 	}
 
-	return NewFloat128(result)
+	return result
 }
 
 func isZeroMantissa(mantissaBits []byte) bool {

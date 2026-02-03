@@ -69,7 +69,7 @@ func TestReadSegmentLeadIn(t *testing.T) {
 			var f *File
 			var err error
 			if c.inputBytes != nil {
-				f = New(bytes.NewReader(c.inputBytes), c.isIndex)
+				f = New(bytes.NewReader(c.inputBytes), c.isIndex, int64(len(c.inputBytes)))
 			} else {
 				f, err = Open(path.Join("testdata", c.inputFname))
 				if err != nil {
@@ -90,20 +90,34 @@ func TestReadSegmentLeadIn(t *testing.T) {
 }
 
 func TestReadSegmentMetadata(t *testing.T) {
+	buildMetadata := func (objects []object) metadata {
+		m := metadata{
+			objectMap: make(map[string]*object, len(objects)),
+			objectList: make([]*object, len(objects)),
+		}
+
+		for i, obj := range objects {
+			m.objectMap[obj.path] = &obj
+			m.objectList[i] = &obj
+		}
+
+		return m
+	}
+
 	cases := []struct {
 		name          string
 		inputBytes    []byte
 		inputFname    string
 		expectedErr   error
-		expectedValue Metadata
+		expectedValue metadata
 		isIndex       bool
 	}{
 		{
 			name:          "read 01_minimal.tdms",
 			inputFname:    "01_minimal.tdms",
 			expectedErr:   nil,
-			expectedValue: Metadata{
-				//
+			expectedValue: metadata{
+				objectMap: ,
 			},
 		},
 	}
@@ -113,7 +127,7 @@ func TestReadSegmentMetadata(t *testing.T) {
 			var f *File
 			var err error
 			if c.inputBytes != nil {
-				f = New(bytes.NewReader(c.inputBytes), c.isIndex)
+				f = New(bytes.NewReader(c.inputBytes), c.isIndex, int64(len(c.inputBytes)))
 			} else {
 				f, err = Open(path.Join("testdata", c.inputFname))
 				if err != nil {
