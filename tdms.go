@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"strings"
 )
@@ -55,13 +56,14 @@ const (
 const leadInSize uint64 = 28
 
 var (
-	tdmsMagicBytes      []byte = []byte{'T', 'D', 'S', 'm'}
-	tdmsIndexMagicBytes []byte = []byte{'T', 'D', 'S', 'h'}
+	tdmsMagicBytes      = []byte{'T', 'D', 'S', 'm'}
+	tdmsIndexMagicBytes = []byte{'T', 'D', 'S', 'h'}
 
-	ErrUnsupportedVersion error = errors.New("unsupported version")
-	ErrReadFailed         error = errors.New("failed to read data")
-	ErrInvalidFileFormat  error = errors.New("invalid file format")
-	ErrInvalidPath        error = errors.New("invalid object path")
+	ErrUnsupportedVersion = errors.New("unsupported version")
+	ErrReadFailed         = errors.New("failed to read data")
+	ErrInvalidFileFormat  = errors.New("invalid file format")
+	ErrInvalidPath        = errors.New("invalid object path")
+	ErrUnsupportedType    = errors.New("unsupported data type")
 )
 
 type File struct {
@@ -69,9 +71,10 @@ type File struct {
 	Properties   map[string]Property
 	IsIncomplete bool
 
-	f       io.ReadSeeker
-	size    int64
-	isIndex bool
+	f        io.ReadSeeker
+	size     int64
+	isIndex  bool
+	segments []segment
 
 	// This does not hold pointers – we want these to be separate instances from
 	// those held by the individual segment as we want to be able to modify this
@@ -91,18 +94,18 @@ type Group struct {
 
 type Property struct {
 	Name     string
-	TypeCode tdsDataType
+	TypeCode DataType
 	Value    any
 }
 
 type Channel struct {
 	Name       string
 	GroupName  string
+	DataType   DataType
 	Properties map[string]Property
 
-	g        *Group
-	f        *File
-	dataType tdsDataType
+	f *File
+	path string
 }
 
 type leadIn struct {
@@ -141,7 +144,7 @@ type object struct {
 
 type rawDataIndex struct {
 	scaler    daqmxScalerType
-	dataType  tdsDataType
+	dataType  DataType
 	numValues uint64
 
 	// Only stored for variable length data types, e.g. strings, and not stored
@@ -153,7 +156,7 @@ type rawDataIndex struct {
 }
 
 type daqmxScaler struct {
-	dataType tdsDataType
+	dataType DataType
 
 	// The documentation is very unclear about what these values actually mean.
 	// It seems clear that "rawBufferIndex" here means index in the i, j way
@@ -166,11 +169,12 @@ type daqmxScaler struct {
 }
 
 type segment struct {
+	offset   int64
 	leadIn   *leadIn
 	metadata *metadata
 }
 
-func New(reader io.ReadSeeker, isIndex bool, size int64) *File {
+func New(reader io.ReadSeeker, isIndex bool, size int64) (*File, error) {
 	// Properties can be overwritten from one segment to the next, so in order
 	// to know the objects and properties, we need to read the metadata for each
 	// segment upfront. For ease of use, we do this here.
@@ -183,26 +187,36 @@ func New(reader io.ReadSeeker, isIndex bool, size int64) *File {
 		objects:    make(map[string]object),
 	}
 
-	f.readMetadata()
-	return f
+	if err := f.readMetadata(); err != nil {
+		return nil, err
+	}
+
+	return f, nil
 }
 
-func Open(fname string) (*File, error) {
-	file, err := os.Open(fname)
+func Open(filename string) (*File, error) {
+	file, err := os.Open(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file %s: %w", fname, err)
+		return nil, fmt.Errorf("failed to open file %s: %w", filename, err)
 	}
 
 	fileInfo, err := file.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file info for %s: %w", fname, err)
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to get file info for %s: %w", filename, err)
 	}
 
-	return New(
+	f, err := New(
 		file,
-		strings.HasSuffix(fname, ".tdms_index"),
+		strings.HasSuffix(filename, ".tdms_index"),
 		fileInfo.Size(),
-	), nil
+	)
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to read file %s: %w", filename, err)
+	}
+
+	return f, nil
 }
 
 func (t *File) Close() error {
@@ -277,6 +291,118 @@ func (t *File) readSegmentLeadIn() (*leadIn, error) {
 	return &leadIn, nil
 }
 
+// readMetadata reads the metadata for each segment in the file.
+func (t *File) readMetadata() error {
+	t.segments = make([]segment, 0)
+
+	var prevSegment *segment
+	i := 0
+	currentOffset := int64(0)
+
+	_, err := t.f.Seek(0, io.SeekStart)
+	if err != nil {
+		return fmt.Errorf("failed to seek to beginning of metadata file: %w", err)
+	}
+
+	for {
+		leadIn, err := t.readSegmentLeadIn()
+		if err != nil {
+			return fmt.Errorf("failed to read segment %d lead in: %w", i, err)
+		}
+
+		if leadIn.containsMetadata {
+			metadata, err := t.readSegmentMetadata(leadIn, prevSegment)
+			if err != nil {
+				return fmt.Errorf("failed to read segment %d metadata: %w", i, err)
+			}
+
+			prevSegment = &segment{
+				offset:   currentOffset,
+				leadIn:   leadIn,
+				metadata: metadata,
+			}
+			t.segments = append(t.segments, *prevSegment)
+		}
+
+		// The next segment offset is the offset from the end of the lead in.
+		currentOffset += int64(leadIn.nextSegmentOffset) + int64(leadInSize)
+
+		if leadIn.nextSegmentOffset == 0xFFFFFFFFFFFFFFFF {
+			// Special value indicates that LabVIEW crashes while writing the final segment.
+			t.IsIncomplete = true
+			break
+		}
+
+		if currentOffset >= t.size {
+			// We've reached the end of the file, all segments are read.
+			t.IsIncomplete = false
+			break
+		}
+
+		// If we're reading an index file, there's no data so one segment's
+		// metadata leads directly into the next segment's lead in.
+		if !t.isIndex {
+			_, err := t.f.Seek(int64(leadIn.nextSegmentOffset), io.SeekCurrent)
+			if err != nil {
+				return fmt.Errorf("failed to seek to segment %d: %w", i, err)
+			}
+		}
+	}
+
+	// Now that we have all the channels, parse the object paths and fill the
+	// file, group, and channel fields accordingly.
+
+	// We hold the channels in a list and add them all to their respective
+	// groups at the end, to avoid processing a channel before we've added the
+	// corresponding group.
+	channels := make(map[string]Channel, len(t.objects))
+
+	for _, obj := range t.objects {
+		groupName, channelName, err := parsePath(obj.path)
+		if err != nil {
+			return fmt.Errorf("failed to parse path for object %s: %w", obj.path, err)
+		}
+
+		if groupName == "" {
+			// This is a root-level object, so merge the properties into the
+			// root file object.
+			maps.Copy(t.Properties, obj.properties)
+		} else if channelName == "" {
+			// This is a group object, so add it to the file's groups.
+			t.Groups[groupName] = Group{
+				Name:       groupName,
+				Properties: obj.properties,
+				Channels:   make(map[string]Channel),
+				f:          t,
+			}
+		} else {
+			// This is a channel object, so add it to the group's channels.
+			channels[channelName] = Channel{
+				Name:       channelName,
+				GroupName:  groupName,
+				DataType:   obj.rawDataIndex.dataType,
+				Properties: obj.properties,
+				f:          t,
+				path: obj.path,
+			}
+		}
+	}
+
+	for channelName, channel := range channels {
+		if _, exists := t.Groups[channel.GroupName]; !exists {
+			return fmt.Errorf("%w: channel %s sits under non-existent group %s",
+				ErrInvalidFileFormat,
+				channelName,
+				channel.GroupName,
+			)
+		}
+
+		t.Groups[channel.GroupName].Channels[channelName] = channel
+	}
+
+	return nil
+}
+
 func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metadata, error) {
 	numObjects, err := readUint32(t.f, leadIn.byteOrder)
 	if err != nil {
@@ -302,7 +428,7 @@ func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metad
 	}
 
 	for i := 0; i < int(numObjects); i++ {
-		obj, err := t.readObject(leadIn)
+		obj, err := t.readObject(leadIn, prevSegment)
 		if err != nil {
 			return nil, fmt.Errorf("error reading object %d: %w", i, err)
 		}
@@ -311,12 +437,16 @@ func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metad
 		// same path, this will overwrite the object with the last value in the
 		// metadata. This is acceptable as this would be against the spec
 		// anyways.
-		//
-		// Todo: also check the file's objects.
 		if existingObj, ok := objectMap[obj.path]; ok {
-			existingObj.hasRawData = false
+			// At the root level, an object has raw data if it has raw data for
+			// any segment. This is one example of why we can't simply use a
+			// single object instance for both root-level and segment-level
+			// objects.
+			existingObj.hasRawData = obj.hasRawData
+			existingObj.isDaqmxIndex = obj.isDaqmxIndex
 
-			// If new object has no raw data, we keep the raw data index from the previous segment.
+			// If new object has no raw data, we keep the raw data index from
+			// the previous segment.
 			if obj.hasRawData {
 				existingObj.rawDataIndex = obj.rawDataIndex
 			}
@@ -324,9 +454,7 @@ func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metad
 			// New properties get added to the map while existing properties get
 			// updated; properties not mentioned in the latest segment are
 			// unchanged.
-			for propName, propValue := range obj.properties {
-				existingObj.properties[propName] = propValue
-			}
+			maps.Copy(existingObj.properties, obj.properties)
 		} else {
 			// You can still add new objects to the list without the new
 			// object list flag.
@@ -337,8 +465,8 @@ func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metad
 		// If this object already exists in the file's collection of properties
 		// (which may happen even if new object list is set or the previous
 		// segment doesn't have the object because it itself has the new object
-		// list flag set), we update the file's objects so that we have an up to
-		// date list of objects. We need to merge properties but replace raw
+		// list flag set), we update the file's objects so that we have an up-to-date
+		// list of objects. We need to merge properties but replace raw
 		// data index.
 		if existingObj, ok := t.objects[obj.path]; ok {
 			// At the top-level, if any segment has raw data for the object,
@@ -346,26 +474,25 @@ func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metad
 			existingObj.hasRawData = existingObj.hasRawData || obj.hasRawData
 
 			if obj.rawDataIndex != nil {
-				// It's ok to use the same pointer here because we only replace
+				// It's OK to use the same pointer here because we only replace
 				// the index, not update it.
 				existingObj.rawDataIndex = obj.rawDataIndex
 
 				existingObj.isDaqmxIndex = obj.isDaqmxIndex
 			}
 
-			for propName, propValue := range obj.properties {
-				existingObj.properties[propName] = propValue
-			}
+			maps.Copy(existingObj.properties, obj.properties)
+
+			// Root level objects map has structs, not pointers, so we need to
+			// remember to update the map once we've updated the fields.
+			t.objects[obj.path] = existingObj
 		} else {
 			// File doesn't have this object yet – better add it.
 			rootObj := *obj
 
 			// We don't want to re-use the map, as above does only a shallow copy.
 			rootObj.properties = make(map[string]Property, len(obj.properties))
-
-			for propName, propValue := range obj.properties {
-				rootObj.properties[propName] = propValue
-			}
+			maps.Copy(rootObj.properties, obj.properties)
 
 			t.objects[obj.path] = rootObj
 		}
@@ -374,9 +501,7 @@ func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metad
 	return &metadata{objectList: objectList, objectMap: objectMap}, nil
 }
 
-func (t *File) readObject(leadIn *leadIn) (*object, error) {
-	// TODO: If leadIn.newObjectList is false, we need to check for prior
-	// objects to update instead of creating an entirely new one.
+func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error) {
 	obj := object{}
 	var err error
 
@@ -390,29 +515,31 @@ func (t *File) readObject(leadIn *leadIn) (*object, error) {
 		return nil, err
 	}
 
+	rawDataIndexPresent := false
+
 	switch rawDataIndexHeader {
 	case rawIndexHeaderNoRawData:
 		obj.hasRawData = false
+		rawDataIndexPresent = false
 	case rawIndexHeaderMatchesPreviousValue:
-		// Raw data index matches one from before – try to find it or something.
-		if leadIn.newObjectList {
-			return nil, errors.Join(
-				ErrInvalidFileFormat,
-				errors.New("raw data index matches previous value but new object list"),
-			)
-		}
-
-		if existingObj, ok := t.objects[obj.path]; ok {
+		// TODO: Should we be checking the prior segment or the whole file?
+		if existingObj, ok := prevSegment.metadata.objectMap[obj.path]; ok {
+			obj.hasRawData = existingObj.hasRawData
+			obj.isDaqmxIndex = existingObj.isDaqmxIndex
 			obj.rawDataIndex = existingObj.rawDataIndex
 		} else {
 			return nil, errors.New("raw data index matches previous value but no prior object found")
 		}
+
+		rawDataIndexPresent = false
 	case rawIndexHeaderFormatChangingScaler:
 		obj.rawDataIndex = &rawDataIndex{scaler: daqmxScalerTypeFormatChanging}
 		obj.isDaqmxIndex = true
+		rawDataIndexPresent = true
 	case rawIndexHeaderDigitalLineScaler:
 		obj.rawDataIndex = &rawDataIndex{scaler: daqmxScalerTypeDigitalLine}
 		obj.isDaqmxIndex = true
+		rawDataIndexPresent = true
 	default:
 		// Value is the length of the raw data index. This value seems pointless
 		// as the raw data index at this point is always 20 = 0x14 bytes in
@@ -421,150 +548,143 @@ func (t *File) readObject(leadIn *leadIn) (*object, error) {
 		// used a special value to indicate "this is a normal raw data index".
 		// It's probably historical.
 		obj.rawDataIndex = &rawDataIndex{scaler: daqmxScalerTypeNone}
+		obj.hasRawData = true
+		obj.isDaqmxIndex = false
+		rawDataIndexPresent = true
 	}
 
-	// The normal index is always 16 bytes long so just read it all at once.
-	rawDataIndexBytes := make([]byte, 16)
-	if _, err := t.f.Read(rawDataIndexBytes); err != nil {
-		return nil, errors.Join(ErrReadFailed, err)
-	}
-
-	obj.rawDataIndex.dataType = tdsDataType(leadIn.byteOrder.Uint32(rawDataIndexBytes))
-
-	dimension := leadIn.byteOrder.Uint32(rawDataIndexBytes[4:8])
-	if dimension != 1 {
-		return nil, errors.Join(
-			ErrInvalidFileFormat,
-			errors.New("in TDMS v2 raw data index dimension must be 1"),
-		)
-	}
-
-	obj.rawDataIndex.numValues = leadIn.byteOrder.Uint64(rawDataIndexBytes[8:16])
-
-	if obj.isDaqmxIndex {
-		numScalers, err := readUint32(t.f, leadIn.byteOrder)
-		if err != nil {
+	if rawDataIndexPresent {
+		// The normal index is always 16 bytes long so just read it all at once.
+		rawDataIndexBytes := make([]byte, 16)
+		if _, err := t.f.Read(rawDataIndexBytes); err != nil {
 			return nil, errors.Join(ErrReadFailed, err)
 		}
 
-		obj.rawDataIndex.scalers = make([]daqmxScaler, numScalers)
+		obj.rawDataIndex.dataType = DataType(leadIn.byteOrder.Uint32(rawDataIndexBytes))
 
-		for i := uint32(0); i < numScalers; i++ {
-			scalerBytes := make([]byte, 16)
-			if _, err := t.f.Read(scalerBytes); err != nil {
+		dimension := leadIn.byteOrder.Uint32(rawDataIndexBytes[4:8])
+		if dimension != 1 {
+			return nil, errors.Join(
+				ErrInvalidFileFormat,
+				errors.New("in TDMS v2 raw data index dimension must be 1"),
+			)
+		}
+
+		obj.rawDataIndex.numValues = leadIn.byteOrder.Uint64(rawDataIndexBytes[8:16])
+
+		if obj.isDaqmxIndex {
+			numScalers, err := readUint32(t.f, leadIn.byteOrder)
+			if err != nil {
 				return nil, errors.Join(ErrReadFailed, err)
 			}
 
-			scaler := &obj.rawDataIndex.scalers[i]
-			scaler.dataType = tdsDataType(leadIn.byteOrder.Uint32(scalerBytes))
-			scaler.rawBufferIndex = leadIn.byteOrder.Uint32(scalerBytes[4:8])
-			scaler.rawByteOffsetWithinStride = leadIn.byteOrder.Uint32(scalerBytes[8:12])
-			scaler.sampleFormatBitmap = leadIn.byteOrder.Uint32(scalerBytes[12:16])
-			scaler.scaleID = leadIn.byteOrder.Uint32(scalerBytes[16:20])
+			obj.rawDataIndex.scalers = make([]daqmxScaler, numScalers)
+
+			for i := range numScalers {
+				scalerBytes := make([]byte, 16)
+				if _, err := t.f.Read(scalerBytes); err != nil {
+					return nil, errors.Join(ErrReadFailed, err)
+				}
+
+				scaler := &obj.rawDataIndex.scalers[i]
+				scaler.dataType = DataType(leadIn.byteOrder.Uint32(scalerBytes))
+				scaler.rawBufferIndex = leadIn.byteOrder.Uint32(scalerBytes[4:8])
+				scaler.rawByteOffsetWithinStride = leadIn.byteOrder.Uint32(scalerBytes[8:12])
+				scaler.sampleFormatBitmap = leadIn.byteOrder.Uint32(scalerBytes[12:16])
+				scaler.scaleID = leadIn.byteOrder.Uint32(scalerBytes[16:20])
+			}
+		} else {
+			// The total size is only present when the data size is variable, e.g. is a string. I can't see any other variable size data types, although I am not sure about FixedPointer and DAQmx data.
+			if obj.rawDataIndex.dataType == DataTypeString {
+				obj.rawDataIndex.totalSize, err = readUint64(t.f, leadIn.byteOrder)
+				if err != nil {
+					return nil, errors.Join(ErrReadFailed, err)
+				}
+			}
 		}
-	} else {
-		obj.rawDataIndex.totalSize, err = readUint64(t.f, leadIn.byteOrder)
+	}
+
+	numProps, err := readUint32(t.f, leadIn.byteOrder)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read number of properties: %w", err)
+	}
+
+	obj.properties = make(map[string]Property, numProps)
+	for range numProps {
+		propName, err := readString(t.f, leadIn.byteOrder)
 		if err != nil {
-			return nil, errors.Join(ErrReadFailed, err)
+			return nil, fmt.Errorf("failed to read property name: %w", err)
 		}
+
+		propDataTypeInt, err := readUint32(t.f, leadIn.byteOrder)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read property data type: %w", err)
+		}
+
+		propDataType := DataType(propDataTypeInt)
+
+		value, err := readValue(propDataType, t.f, leadIn.byteOrder)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read property value: %w", err)
+		}
+
+		prop := Property{
+			Name:     propName,
+			TypeCode: propDataType,
+			Value:    value,
+		}
+
+		obj.properties[propName] = prop
 	}
 
 	return &obj, nil
 }
 
-// readMetadata reads the metadata for each segment in the file.
-func (t *File) readMetadata() error {
-	var prevSegment *segment
-	i := 0
-	currentOffset := int64(0)
-
-	t.f.Seek(0, io.SeekStart)
-
-	for {
-		leadIn, err := t.readSegmentLeadIn()
-		if err != nil {
-			return fmt.Errorf("failed to read segment %d lead in: %w", i, err)
-		}
-
-		metadata, err := t.readSegmentMetadata(leadIn, prevSegment)
-		if err != nil {
-			return fmt.Errorf("failed to read segment %d metadata: %w", i, err)
-		}
-
-		segment := segment{leadIn: leadIn, metadata: metadata}
-
-		currentOffset += int64(segment.leadIn.nextSegmentOffset)
-
-		if leadIn.nextSegmentOffset == 0xFFFFFFFFFFFFFFFF {
-			// Special value indicates that LabVIEW crashes while writing the final segment.
-			t.IsIncomplete = true
-			break
-		}
-
-		if currentOffset >= t.size {
-			// We've reached the end of the file, all segments are read.
-			t.IsIncomplete = false
-			break
-		}
-
-		prevSegment = &segment
-
-		// If we're reading an index file, there's no data so one segment's
-		// metadata leads directly into the next segment's lead in.
-		if !t.isIndex {
-			t.f.Seek(int64(leadIn.nextSegmentOffset), io.SeekCurrent)
-		}
-	}
-
-	// Now that we have all the channels, parse the object paths and fill the
-	// file, group, and channel fields accordingly.
-
-	// We hold the channels in a list and add them all to their respective
-	// groups at the end, to avoid processing a channel before we've added the
-	// corresponding group.
-	channels := make(map[string]Channel, len(t.objects))
-
-	for _, obj := range t.objects {
-		groupName, channelName, err := parsePath(obj.path)
-		if err != nil {
-			return fmt.Errorf("failed to parse path for object %s: %w", obj.path, err)
-		}
-
-		if groupName == "" {
-			// This is a root-level object, so merge the properties into the
-			// root file object.
-			for propName, propValue := range obj.properties {
-				t.Properties[propName] = propValue
-			}
-		} else if channelName == "" {
-			// This is a group object, so add it to the file's groups.
-			t.Groups[groupName] = Group{
-				Name:       groupName,
-				Properties: obj.properties,
-				Channels:   make(map[string]Channel, 0),
-				f:          t,
-			}
-		} else {
-			// This is a channel object, so add it to the group's channels.
-			channels[channelName] = Channel{
-				Name:       channelName,
-				Properties: obj.properties,
-				f:          t,
-			}
-		}
-	}
-
-	for channelName, channel := range channels {
-		if _, exists := t.Groups[channel.GroupName]; !exists {
-			return fmt.Errorf("%w: channel %s sits under non-existent group %s",
-				ErrInvalidFileFormat,
-				channelName,
-				channel.GroupName,
-			)
-		}
-
-		t.Groups[channel.GroupName].Channels[channelName] = channel
-	}
-
-	return nil
+func (c *Channel) Parent() Group {
+	return c.f.Groups[c.GroupName]
 }
+
+func (c *Channel) ReadDataRaw(yield func([]byte) error) error {
+	// We could keep track of which segments hold data for which channels to
+	// potentially speed this up, but I don't think it would make a big
+	// difference.
+	for _, segment := range c.f.segments {
+		segmentObject, exists := segment.metadata.objectMap[c.path]
+		if !exists || !segmentObject.hasRawData {
+			// A channel doesn't have to exist or have data in all segments.
+			continue
+		}
+
+		channelIdx := 0
+		i := 0
+
+		// TODO: This could be sped up by keeping not an ordered list of objects
+		// but a map from path to index, where we would have to pre-calculate
+		// the index.
+		for _, obj := range segment.metadata.objectList {
+			if obj.path == c.path {
+				channelIdx = i
+			}
+
+			if obj.hasRawData {
+				i++
+			}
+		}
+
+		if segment.leadIn.isInterleaved {
+			// TODO: Handle interleaved data
+		} else {
+			// TODO: Handle non-interleaved data
+		}
+	}
+
+	if c.rawDataIndex.totalSize > maxBufferSize {
+		return ErrBufferSizeExceeded
+	}
+
+	buf := make([]byte, c.rawDataIndex.totalSize)
+	if _, err := io.ReadFull(c.f, buf); err != nil {
+		return fmt.Errorf("failed to read raw data: %w", err)
+	}
+
+	return yield(buf)

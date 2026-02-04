@@ -2,99 +2,97 @@ package tdms
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
-	"math"
 	"math/big"
 	"time"
 )
 
-type tdsDataType uint32
+type DataType uint32
 
 const (
-	tdsTypeVoid tdsDataType = iota
-	tdsTypeInt8
-	tdsTypeInt16
-	tdsTypeInt32
-	tdsTypeInt64
-	tdsTypeUint8
-	tdsTypeUint16
-	tdsTypeUint32
-	tdsTypeUint64
-	tdsTypeFloat32
-	tdsTypeFloat64
-	tdsTypeFloat128
-	tdsTypeFloat32WithUnit  tdsDataType = 0x19
-	tdsTypeFloat64WithUnit  tdsDataType = 0x1A
-	tdsTypeFloat128WithUnit tdsDataType = 0x1B
-	tdsTypeString           tdsDataType = 0x20
-	tdsTypeBoolean          tdsDataType = 0x21
-	tdsTypeTime             tdsDataType = 0x44
-	tdsTypeFixedPoint       tdsDataType = 0x4F
-	tdsTypeComplex64        tdsDataType = 0x08000c
-	tdsTypeComplex128       tdsDataType = 0x10000d
-	tdsTypeDAQmxRawData     tdsDataType = 0xFFFFFFFF
+	DataTypeVoid DataType = iota
+	DataTypeInt8
+	DataTypeInt16
+	DataTypeInt32
+	DataTypeInt64
+	DataTypeUint8
+	DataTypeUint16
+	DataTypeUint32
+	DataTypeUint64
+	DataTypeFloat32
+	DataTypeFloat64
+	DataTypeFloat128
+	DataTypeFloat32WithUnit  DataType = 0x19
+	DataTypeFloat64WithUnit  DataType = 0x1A
+	DataTypeFloat128WithUnit DataType = 0x1B
+	DataTypeString           DataType = 0x20
+	DataTypeBool             DataType = 0x21
+	DataTypeTime             DataType = 0x44
+	DataTypeFixedPoint       DataType = 0x4F
+	DataTypeComplex64        DataType = 0x08000c
+	DataTypeComplex128       DataType = 0x10000d
+	DataTypeDAQmxRawData     DataType = 0xFFFFFFFF
 )
 
-func (dt tdsDataType) Size() int {
+func (dt DataType) Size() int {
 	switch dt {
-	case tdsTypeVoid, tdsTypeString:
+	case DataTypeVoid, DataTypeString:
 		return 0 // Strings are variable length
-	case tdsTypeInt8, tdsTypeUint8, tdsTypeBoolean:
+	case DataTypeInt8, DataTypeUint8, DataTypeBool:
 		return 1
-	case tdsTypeInt16, tdsTypeUint16:
+	case DataTypeInt16, DataTypeUint16:
 		return 2
-	case tdsTypeInt32, tdsTypeUint32, tdsTypeFloat32:
+	case DataTypeInt32, DataTypeUint32, DataTypeFloat32:
 		return 4
-	case tdsTypeInt64, tdsTypeUint64, tdsTypeFloat64, tdsTypeComplex64:
+	case DataTypeInt64, DataTypeUint64, DataTypeFloat64, DataTypeComplex64:
 		return 8
-	case tdsTypeFloat128, tdsTypeComplex128, tdsTypeTime:
+	case DataTypeFloat128, DataTypeComplex128, DataTypeTime:
 		return 16
 	default:
 		return 0
 	}
 }
 
-func (dt tdsDataType) Name() string {
+func (dt DataType) Name() string {
 	switch dt {
-	case tdsTypeVoid:
+	case DataTypeVoid:
 		return "Void"
-	case tdsTypeInt8:
+	case DataTypeInt8:
 		return "Int8"
-	case tdsTypeInt16:
+	case DataTypeInt16:
 		return "Int16"
-	case tdsTypeInt32:
+	case DataTypeInt32:
 		return "Int32"
-	case tdsTypeInt64:
+	case DataTypeInt64:
 		return "Int64"
-	case tdsTypeUint8:
+	case DataTypeUint8:
 		return "Uint8"
-	case tdsTypeUint16:
+	case DataTypeUint16:
 		return "Uint16"
-	case tdsTypeUint32:
+	case DataTypeUint32:
 		return "Uint32"
-	case tdsTypeUint64:
+	case DataTypeUint64:
 		return "Uint64"
-	case tdsTypeFloat32:
+	case DataTypeFloat32:
 		return "Float32"
-	case tdsTypeFloat64:
+	case DataTypeFloat64:
 		return "Float64"
-	case tdsTypeFloat128, tdsTypeFloat128WithUnit:
+	case DataTypeFloat128, DataTypeFloat128WithUnit:
 		return "Float128"
-	case tdsTypeString:
+	case DataTypeString:
 		return "String"
-	case tdsTypeBoolean:
-		return "Boolean"
-	case tdsTypeTime:
+	case DataTypeBool:
+		return "Bool"
+	case DataTypeTime:
 		return "Time"
-	case tdsTypeComplex64:
+	case DataTypeComplex64:
 		return "ComplexFloat64"
-	case tdsTypeComplex128:
+	case DataTypeComplex128:
 		return "ComplexFloat128"
-	case tdsTypeFixedPoint:
+	case DataTypeFixedPoint:
 		return "FixedPoint"
-	case tdsTypeDAQmxRawData:
+	case DataTypeDAQmxRawData:
 		return "DAQmxRawData"
 	default:
 		return fmt.Sprintf("Unknown(0x%X)", uint32(dt))
@@ -105,241 +103,67 @@ func (dt tdsDataType) Name() string {
 // to a unix timestamp, you can simply do `tdmsTimestamp + tdmsEpoch`.
 const tdmsEpoch int64 = -2_082_844_800
 
-func ptr[T any](value T) *T { return &value }
-
-func NewDataType(typeCode tdsDataType) (DataType, error) {
+func readValue(typeCode DataType, reader io.Reader, byteOrder binary.ByteOrder) (any, error) {
 	switch typeCode {
-	case tdsTypeVoid:
-		return &TDSVoid{}, nil
-	case tdsTypeInt8:
-		return ptr(TDSInt8(0)), nil
-	case tdsTypeInt16:
-		return ptr(TDSInt16(0)), nil
-	case tdsTypeInt32:
-		return ptr(TDSInt32(0)), nil
-	case tdsTypeInt64:
-		return ptr(TDSInt64(0)), nil
-	case tdsTypeUint8:
-		return ptr(TDSUint8(0)), nil
-	case tdsTypeUint16:
-		return ptr(TDSUint16(0)), nil
-	case tdsTypeUint32:
-		return ptr(TDSUint32(0)), nil
-	case tdsTypeUint64:
-		return ptr(TDSUint64(0)), nil
-	case tdsTypeFloat32:
-		return ptr(TDSFloat32(0)), nil
-	case tdsTypeFloat64:
-		return ptr(TDSFloat64(0)), nil
-	case tdsTypeFloat128:
-		return &Float128{}, nil
-	case tdsTypeFloat32WithUnit:
-		return ptr(TDSFloat32WithUnit(0)), nil
-	case tdsTypeFloat64WithUnit:
-		return ptr(TDSFloat64WithUnit(0)), nil
-	case tdsTypeFloat128WithUnit:
-		return &TDSFloat128WithUnit{}, nil
-	case tdsTypeString:
-		return ptr(TDSString("")), nil
-	case tdsTypeBoolean:
-		return ptr(TDSBool(false)), nil
-	case tdsTypeTime:
-		return &TDSTime{}, nil
-	case tdsTypeFixedPoint:
-		return &TDSFixedPoint{}, nil
-	case tdsTypeComplex64:
-		return ptr(TDSComplexFloat32(0 + 0i)), nil
-	case tdsTypeComplex128:
-		return ptr(TDSComplexFloat64(0 + 0i)), nil
-	case tdsTypeDAQmxRawData:
-		return &TDSDAQmxRawData{}, nil
+	case DataTypeVoid:
+		return nil, nil
+	case DataTypeInt8:
+		return readInt8(reader, byteOrder)
+	case DataTypeInt16:
+		return readInt16(reader, byteOrder)
+	case DataTypeInt32:
+		return readInt32(reader, byteOrder)
+	case DataTypeInt64:
+		return readInt64(reader, byteOrder)
+	case DataTypeUint8:
+		return readUint8(reader, byteOrder)
+	case DataTypeUint16:
+		return readUint16(reader, byteOrder)
+	case DataTypeUint32:
+		return readUint32(reader, byteOrder)
+	case DataTypeUint64:
+		return readUint64(reader, byteOrder)
+	// The "with unit" data types are exactly the same, but just tell readers to
+	// exact the unit to be in a property called "unit_string".
+	case DataTypeFloat32, DataTypeFloat32WithUnit:
+		return readFloat32(reader, byteOrder)
+	case DataTypeFloat64, DataTypeFloat64WithUnit:
+		return readFloat64(reader, byteOrder)
+	case DataTypeFloat128, DataTypeFloat128WithUnit:
+		return readFloat128(reader, byteOrder)
+	case DataTypeString:
+		return readString(reader, byteOrder)
+	case DataTypeBool:
+		return readBool(reader, byteOrder)
+	case DataTypeTime:
+		return readTime(reader, byteOrder)
+	case DataTypeComplex64:
+		return readComplex64(reader, byteOrder)
+	case DataTypeComplex128:
+		return readComplex128(reader, byteOrder)
 	default:
-		return nil, fmt.Errorf("unknown type code: %d", typeCode)
-	}
-}
-
-type DataType interface {
-	// The size of the data type in bytes. Value of `-1` means the size is variable.
-	Size() int
-
-	// Read data from reader into variable, using input byte order. Assumes the
-	// input reader is positioned at the start of the data type.
-	Read(reader io.Reader, byteOrder binary.ByteOrder) error
-}
-
-type TDSVoid struct{}
-
-func (t TDSVoid) Size() int {
-	return 0
-}
-
-func (t TDSVoid) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	return nil
-}
-
-type TDSInt8 int8
-
-func (t TDSInt8) Size() int {
-	return 1
-}
-
-func (t *TDSInt8) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, t.Size())
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
+		return nil, ErrUnsupportedType
 	}
 
-	// Byte order doesn't matter here because it's only 1 byte long.
-	*t = TDSInt8(int8(valBytes[0]))
-	return nil
-}
+	// The NI documentation provides nothing on how fixed points are stored.
+	// There is a page for how they are stored in memory while using LabVIEW,
+	// but not how it is stored on disk. Without an example or additional
+	// documentation, it's not possible to implement this. It's also not
+	// possible to know how large the data points are, which means you can't
+	// know how far to skip even if you want to ignore the fixed point channel.
+	//
+	// This means that the presence of any fixed point data renders a file
+	// unreadable. If you have more information or an actual TDMS file with a
+	// fixed point data channel in it, please contact the author of this
+	// repository so that this can be implemented.
+	//
+	// See:
+	// https://www.ni.com/docs/en-US/bundle/labview/page/numeric-data.html
+	// https://www.ni.com/docs/en-US/bundle/labview/page/numeric-data-types-table.html
+	// https://www.ni.com/docs/en-US/bundle/labview/page/labview-manager-data-types.html#d96127e328
 
-type TDSInt16 int16
-
-func (t TDSInt16) Size() int {
-	return 2
-}
-
-func (t *TDSInt16) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, t.Size())
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSInt16(int16(byteOrder.Uint16(valBytes)))
-	return nil
-}
-
-type TDSInt32 int32
-
-func (t TDSInt32) Size() int {
-	return 4
-}
-
-func (t *TDSInt32) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, t.Size())
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSInt32(int32(byteOrder.Uint32(valBytes)))
-	return nil
-}
-
-type TDSInt64 int64
-
-func (t TDSInt64) Size() int {
-	return 8
-}
-
-func (t *TDSInt64) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, t.Size())
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSInt64(int64(byteOrder.Uint64(valBytes)))
-	return nil
-}
-
-type TDSUint8 uint8
-
-func (t TDSUint8) Value() uint32 {
-	return 5
-}
-
-func (t TDSUint8) Size() int {
-	return 1
-}
-
-func (t *TDSUint8) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, t.Size())
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSUint8(valBytes[0])
-	return nil
-}
-
-type TDSUint16 uint16
-
-func (t TDSUint16) Size() int {
-	return 2
-}
-
-func (t *TDSUint16) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, t.Size())
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSUint16(byteOrder.Uint16(valBytes))
-	return nil
-}
-
-type TDSUint32 uint32
-
-func (t TDSUint32) Size() int {
-	return 4
-}
-
-func (t *TDSUint32) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, t.Size())
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSUint32(byteOrder.Uint32(valBytes))
-	return nil
-}
-
-type TDSUint64 uint64
-
-func (t TDSUint64) Size() int {
-	return 8
-}
-
-func (t *TDSUint64) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, t.Size())
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSUint64(byteOrder.Uint64(valBytes))
-	return nil
-}
-
-type TDSFloat32 float32
-
-func (t TDSFloat32) Size() int {
-	return 4
-}
-
-func (t *TDSFloat32) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, t.Size())
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSFloat32(math.Float32frombits(byteOrder.Uint32(valBytes)))
-	return nil
-}
-
-type TDSFloat64 float64
-
-func (t TDSFloat64) Size() int {
-	return 8
-}
-
-func (t *TDSFloat64) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, t.Size())
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSFloat64(math.Float64frombits(byteOrder.Uint64(valBytes)))
-	return nil
+	// It's also not clear what DAQmx data type actually means – is it just an
+	// indicator that the data is a vector of other data types?
 }
 
 // When represented in memory, this type is always little endian. To get a
@@ -445,77 +269,9 @@ func mantissaToBigInt(mantissaBits []byte) *big.Int {
 	return result
 }
 
-// The "with unit" data types are exactly the same, but just tell readers to
-// exact the unit to be in a property called "unit_string".
-
-type TDSFloat32WithUnit = TDSFloat32
-type TDSFloat64WithUnit = TDSFloat64
-type TDSFloat128WithUnit = TDSFloat128
-
-type TDSString string
-
-func (t TDSString) Size() int {
-	return len(string(t))
-}
-
-func (t *TDSString) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	sizeBytes := make([]byte, 4)
-	if _, err := reader.Read(sizeBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	size := int(byteOrder.Uint32(sizeBytes))
-
-	data := make([]byte, size)
-	if _, err := reader.Read(data); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSString(string(data))
-	return nil
-}
-
-type TDSBool bool
-
-func (t TDSBool) Size() int {
-	return 1
-}
-
-func (t *TDSBool) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	boolBytes := make([]byte, 1)
-	if _, err := reader.Read(boolBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSBool(boolBytes[0] != 0)
-	return nil
-}
-
-type TDSTime struct {
+type Time struct {
 	Timestamp int64
 	Remainder uint64
-}
-
-func (t TDSTime) Size() int {
-	return 16
-}
-
-// TDMS stores timestamps as a combination of i64 n# seconds since TDMS epoch
-// which is 1st January 1904 at midnight and u64 number representing number
-// fractional remainder, wherethe actual fractional n# seconds is retrieved by
-// dividing by 2^-64. There is no timezone support.
-// https://www.ni.com/en/support/documentation/supplemental/08/labview-timestamp-overview.html
-func (t *TDSTime) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	timeBytes := make([]byte, 16)
-	if _, err := reader.Read(timeBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	*t = TDSTime{
-		Timestamp: int64(byteOrder.Uint64(timeBytes)),
-		Remainder: byteOrder.Uint64(timeBytes[8:]),
-	}
-	return nil
 }
 
 // Time removes much of the precision in the TDS timestamp itself by converting
@@ -523,7 +279,13 @@ func (t *TDSTime) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
 // attoseconds) to nanoseconds. Thus, the TDS format retains approximately 1.8 ×
 // 10^10 times more information than time.Time. This is not relevant for most
 // purposes, but important to keep in mind.
-func (t *TDSTime) Time() time.Time {
+//
+// TDMS stores timestamps as a combination of i64 n# seconds since TDMS epoch
+// which is 1st January 1904 at midnight and u64 number representing number
+// fractional remainder, wherethe actual fractional n# seconds is retrieved by
+// dividing by 2^-64. There is no timezone support.
+// https://www.ni.com/en/support/documentation/supplemental/08/labview-timestamp-overview.html
+func (t *Time) Time() time.Time {
 	// I'm not sure whether this big.Int stuff is necessary as opposed to doing
 	// `float64(posFractions) * math.Pow(2, -64) * 1e9`. I need to experiment
 	// with some large values to determine.
@@ -531,78 +293,4 @@ func (t *TDSTime) Time() time.Time {
 	ns.Mul(ns, big.NewInt(1e9))
 	ns.Rsh(ns, 64)
 	return time.Unix(t.Timestamp, ns.Int64())
-}
-
-// The NI documentation provides nothing on how fixed points are stored. There
-// is a page for how they are stored in memory while using LabVIEW, but not how
-// it is stored on disk. Without an example or additional documentation, it's
-// not possible to implement this. It's also not possible to know how large the
-// data points are, which means you can't know how far to skip even if you want
-// to ignore the fixed point channel. This means that the presence of any fixed
-// point data renders a file unreadable. If you have more information or an
-// actual TDMS file with a fixed point data channel in it, please contact the
-// author of this repository so that this can be implemented.
-// https://www.ni.com/docs/en-US/bundle/labview/page/numeric-data.html
-// https://www.ni.com/docs/en-US/bundle/labview/page/numeric-data-types-table.html
-// https://www.ni.com/docs/en-US/bundle/labview/page/labview-manager-data-types.html#d96127e328
-type TDSFixedPoint struct{}
-
-func (t TDSFixedPoint) Size() int {
-	panic("not implemented")
-}
-
-func (t TDSFixedPoint) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	panic("not implemented")
-}
-
-type TDSComplexFloat32 complex64
-
-func (t TDSComplexFloat32) Size() int {
-	return 8
-}
-
-func (t *TDSComplexFloat32) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, 8)
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	real := math.Float32frombits(byteOrder.Uint32(valBytes))
-	imag := math.Float32frombits(byteOrder.Uint32(valBytes))
-
-	*t = TDSComplexFloat32(complex(real, imag))
-	return nil
-}
-
-type TDSComplexFloat64 complex128
-
-func (t TDSComplexFloat64) Size() int {
-	return 16
-}
-
-func (t *TDSComplexFloat64) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	valBytes := make([]byte, 16)
-	if _, err := reader.Read(valBytes); err != nil {
-		return errors.Join(ErrReadFailed, err)
-	}
-
-	real := math.Float64frombits(byteOrder.Uint64(valBytes))
-	imag := math.Float64frombits(byteOrder.Uint64(valBytes))
-
-	*t = TDSComplexFloat64(complex(real, imag))
-	return nil
-}
-
-// I'm not entirely sure, but I think data type of "DAQmx raw data" means that
-// the actual data type is found inside the raw data index information, so
-// "DAQmx" is not actually a data type itself but an indicator of a different
-// representation of the data.
-type TDSDAQmxRawData struct{}
-
-func (t TDSDAQmxRawData) Size() int {
-	return 0
-}
-
-func (t *TDSDAQmxRawData) Read(reader io.Reader, byteOrder binary.ByteOrder) error {
-	return nil
 }
