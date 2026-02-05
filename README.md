@@ -1,5 +1,7 @@
 # go-tdms
 
+[![CI](https://github.com/drewsilcock/go-tdms/actions/workflows/ci.yaml/badge.svg)](https://github.com/drewsilcock/go-tdms/actions/workflows/ci.yaml)
+
 This is a pure Go no-dependency* file parser for the Technical Data Management Streaming (TDMS) format used by National Instruments (NI) software such as LabVIEW.
 
 *There is a single dependency that's used only for tests, so this shouldn't be brought through into your code when you install it.
@@ -8,16 +10,16 @@ This is a pure Go no-dependency* file parser for the Technical Data Management S
 
 As of February 2026, this is being actively maintained but has not been battled-tested.
 
-| Feature | Status |
-| ------- | ------ |
-| Reading TDMS file metadata | ☑️ |
-| Reading properties from file objects | ☑️ |
-| Reading data from channels | ☑️ |
-| Streaming data from channels | ☑️ |
-| Extended precision floating point data type | ☑️ |
-| Timestamp floating point data type | ☑️ |
-| Data scaling | □ |
-| DAQmx data and data scaling | □ |
+| Feature                                     | Status |
+|---------------------------------------------|--------|
+| Reading TDMS file metadata                  | ☑️     |
+| Reading properties from file objects        | ☑️     |
+| Reading data from channels                  | ☑️     |
+| Streaming data from channels                | ☑️     |
+| Extended precision floating point data type | ☑️     |
+| Timestamp floating point data type          | ☑️     |
+| Data scaling                                | □      |
+| DAQmx data and data scaling                 | □      |
 
 ## References
 
