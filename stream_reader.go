@@ -13,6 +13,7 @@ package tdms
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 )
@@ -24,12 +25,12 @@ type interpreter[T any] func([]byte, binary.ByteOrder) T
 // in many scenarios.
 func StreamReader[T any](
 	ch *Channel,
-	batchSize int,
+	options []ReadOption,
 	dataType DataType,
 	interpret interpreter[T],
 ) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
-		for batch, err := range BatchStreamReader(ch, batchSize, dataType, interpret) {
+		for batch, err := range BatchStreamReader(ch, options, dataType, interpret) {
 			if err != nil {
 				yield(*new(T), err)
 				return
@@ -58,12 +59,20 @@ func StreamReader[T any](
 // TODO: This doesn't correctly handle reading channels of type string.
 func BatchStreamReader[T any](
 	ch *Channel,
-	batchSize int,
+	options []ReadOption,
 	dataType DataType,
 	interpret interpreter[T],
 ) iter.Seq2[[]T, error] {
 	return func(yield func([]T, error) bool) {
+		opts := readOptions{batchSize: 10_048}
+		for _, opt := range options {
+			opt(&opts)
+		}
+
+		batchSize := min(opts.batchSize, int(ch.totalNumValues))
 		dataSize := dataType.Size()
+
+		// TODO: If total data size < batch size, allocate less.
 
 		buf := make([]byte, batchSize*dataSize)
 		bufLen := uint64(len(buf))
@@ -80,9 +89,9 @@ func BatchStreamReader[T any](
 
 			// Special case for strings, where the indices into the strings are
 			// stored at the beginning of the chunk.
-			var strOffsets []uint32
+			strOffsets := []uint32{0}
 			if dataType == DataTypeString {
-				strOffsetsBytes := make([]byte, chunk.numValues)
+				strOffsetsBytes := make([]byte, chunk.numValues*4)
 				if n, err := r.Read(strOffsetsBytes); err != nil {
 					yield(nil, err)
 					return
@@ -90,9 +99,8 @@ func BatchStreamReader[T any](
 					bytesRead += uint64(n)
 				}
 
-				strOffsets = make([]uint32, chunk.numValues)
 				for i := range chunk.numValues {
-					strOffsets[i] = chunk.order.Uint32(strOffsetsBytes[i*4:])
+					strOffsets = append(strOffsets, chunk.order.Uint32(strOffsetsBytes[i*4:]))
 				}
 			}
 
@@ -102,7 +110,35 @@ func BatchStreamReader[T any](
 
 			for {
 				// We don't want to read past the end of the chunk.
-				bytesLeft := chunk.chunkSize - bytesRead
+				bytesLeft := chunk.size - bytesRead
+				if bytesLeft <= 0 {
+					break
+				}
+
+				// For strings, our buf starts with length 0 because data size
+				// is 0. Now that we know how long each value is, we can make
+				// buf big enough to hold the values for this batch.
+				if dataType == DataTypeString {
+					numValuesLeft := 0
+					for i := valuesProcessed; i < int(chunk.numValues); i++ {
+						numValuesLeft++
+					}
+
+					requiredNumValues := min(batchSize, numValuesLeft)
+
+					requiredBufLen := uint32(0)
+					for i := valuesProcessed; i < valuesProcessed+requiredNumValues; i++ {
+						requiredBufLen += strOffsets[i+1] - strOffsets[i]
+					}
+
+					bufLen = uint64(requiredBufLen)
+					if cap(buf) < int(requiredBufLen) {
+						buf = make([]byte, requiredBufLen)
+					} else {
+						buf = buf[:requiredBufLen]
+					}
+				}
+
 				if bufLen > bytesLeft {
 					// This retains capacity.
 					buf = buf[:bytesLeft]
@@ -115,9 +151,20 @@ func BatchStreamReader[T any](
 				if chunk.isInterleaved == false {
 					n, err = io.ReadFull(r, buf)
 				} else {
+					// You aren't allowed to have interleaved variable-length
+					// data channels.
+					if dataSize == 0 {
+						yield(
+							nil,
+							fmt.Errorf(
+								"%w: interleaved data chunks cannot contains variable-length data types",
+								ErrInvalidFileFormat,
+							),
+						)
+						return
+					}
 
 					for i := 0; i < len(buf); i += dataSize {
-
 						if i > 0 {
 							if _, err := r.Seek(chunk.stride, io.SeekCurrent); err != nil {
 								yield(nil, err)
@@ -165,12 +212,12 @@ func BatchStreamReader[T any](
 					endIdx := int(i+1) * dataSize
 
 					if dataType == DataTypeString {
+						// strOffsets should always have one more data point in
+						// it than number of strings – we added the 0 at the
+						// beginning and the last value is the end of the final
+						// string.
 						startIdx = int(strOffsets[i])
-						if int(i+1) < len(strOffsets) {
-							endIdx = int(strOffsets[i+1])
-						} else {
-							endIdx = len(buf)
-						}
+						endIdx = int(strOffsets[i+1])
 					}
 
 					batch[i] = interpret(buf[startIdx:endIdx], chunk.order)
@@ -188,4 +235,25 @@ func BatchStreamReader[T any](
 			}
 		}
 	}
+}
+
+// readAllData reads all data from a channel and put it into a single slice.
+//
+// By re-using BatchStreamReader here, we can avoid having to allocate 2*N bytes
+// – one for the raw bytes and other for the interpreted values. The raw bytes
+// are still batched while we allocate the values slice up-front. It's also
+// cleaner in terms of the code as we avoid re-implementing the underlying read
+// functionality.
+func readAllData[T any](ch *Channel, options []ReadOption, dataType DataType, interpret interpreter[T]) ([]T, error) {
+	values := make([]T, 0, ch.totalNumValues)
+
+	for batch, err := range BatchStreamReader(ch, options, dataType, interpret) {
+		if err != nil {
+			return nil, err
+		}
+
+		values = append(values, batch...)
+	}
+
+	return values, nil
 }

@@ -151,7 +151,7 @@ func buildTestCases() []testCase {
 			},
 
 			data: map[string][]any{
-				"Channel": []uint32{},
+				"Channel": []any{},
 			},
 		},
 
@@ -163,20 +163,11 @@ func buildTestCases() []testCase {
 		//},
 	}
 
-	// Now update the internal pointer references. Note: we can't really set the
-	// ReadSeeker on the root file object so we need to just set that to null
-	// before we do the test comparison.
-	for i := range testCases {
-		for groupName, group := range testCases[i].expected.Groups {
-			for channelName, channel := range group.Channels {
-				channel.f = testCases[i].expected
-				group.Channels[channelName] = channel
-			}
-
-			group.f = testCases[i].expected
-			testCases[i].expected.Groups[groupName] = group
-		}
+	testValues := make([]any, 100)
+	for i := range 100 {
+		testValues[i] = i
 	}
+	testCases[0].data["Channel"] = testValues
 
 	return testCases
 }
@@ -199,12 +190,13 @@ func TestReadTDMSFiles(t *testing.T) {
 				return
 			}
 
-			// TODO: Test reading data from channels.
+			ch := f.Groups["Group"].Channels["Channel"]
+			ch.ReadDataAsUint32()
 		})
 	}
 }
 
-func diff(want, got interface{}, opts ...cmp.Option) string {
+func diff(want, got any, opts ...cmp.Option) string {
 	diff := cmp.Diff(want, got, opts...)
 	if diff == "" {
 		return ""

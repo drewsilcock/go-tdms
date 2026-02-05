@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  GO_VERSIONS: '["1.25", "1.24"]'
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ${{ fromJSON(vars.GO_VERSIONS || env.GO_VERSIONS) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          args: --timeout=5m
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ${{ fromJSON(vars.GO_VERSIONS || env.GO_VERSIONS) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Generate test files
+        run: |
+          cd scripts
+          uv run generate-test-files.py ../tests/testdata
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          file: ./coverage.out
+        if: matrix.go-version == fromJSON(vars.GO_VERSIONS || env.GO_VERSIONS)[0]
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ${{ fromJSON(vars.GO_VERSIONS || env.GO_VERSIONS) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Build
+        run: go build -v ./...

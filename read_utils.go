@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 )
 
 // This code would be much simpler if we used `binary.Read()`, but that function
@@ -139,13 +140,13 @@ func readBool(reader io.Reader, order binary.ByteOrder) (bool, error) {
 		return false, errors.Join(ErrReadFailed, err)
 	}
 
-	return interpretBool(valueBytes), nil
+	return interpretBool(valueBytes, order), nil
 }
 
-func readTime(reader io.Reader, order binary.ByteOrder) (Time, error) {
+func readTime(reader io.Reader, order binary.ByteOrder) (time.Time, error) {
 	valueBytes := make([]byte, 16)
 	if _, err := reader.Read(valueBytes); err != nil {
-		return Time{}, errors.Join(ErrReadFailed, err)
+		return time.Time{}, errors.Join(ErrReadFailed, err)
 	}
 
 	return interpretTime(valueBytes, order), nil
@@ -234,15 +235,16 @@ func interpretString(bytes []byte, order binary.ByteOrder) string {
 	return string(bytes)
 }
 
-func interpretBool(bytes []byte) bool {
+func interpretBool(bytes []byte, order binary.ByteOrder) bool {
 	return bytes[0] != 0
 }
 
-func interpretTime(bytes []byte, order binary.ByteOrder) Time {
-	return Time{
+func interpretTime(bytes []byte, order binary.ByteOrder) time.Time {
+	tdsTime := Time{
 		Timestamp: int64(order.Uint64(bytes)),
 		Remainder: order.Uint64(bytes[8:]),
 	}
+	return tdsTime.Time()
 }
 
 func interpretComplex64(bytes []byte, order binary.ByteOrder) complex64 {

@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"strings"
+	"time"
 )
 
 const (
@@ -110,9 +111,11 @@ type Channel struct {
 	DataType   DataType
 	Properties map[string]Property
 
-	f          *File
-	path       string
-	dataChunks []dataChunk
+	f              *File
+	path           string
+	dataChunks     []dataChunk
+	totalSize      uint64
+	totalNumValues uint64
 }
 
 type segment struct {
@@ -205,7 +208,7 @@ type dataChunk struct {
 	offset        int64
 	isInterleaved bool
 	order         binary.ByteOrder
-	chunkSize     uint64 // Do we need this?
+	size          uint64
 	numValues     uint64
 	stride        int64
 }
@@ -392,7 +395,7 @@ func (t *File) readMetadata() error {
 		// If we're reading an index file, there's no data so one segment's
 		// metadata leads directly into the next segment's lead in.
 		if !t.isIndex {
-			_, err := t.f.Seek(int64(leadIn.nextSegmentOffset), io.SeekCurrent)
+			_, err := t.f.Seek(currentOffset, io.SeekStart)
 			if err != nil {
 				return fmt.Errorf("failed to seek to segment %d: %w", i, err)
 			}
@@ -438,7 +441,7 @@ func (t *File) readMetadata() error {
 				}
 
 				obj, ok := segment.metadata.objects[obj.path]
-				if !ok {
+				if !ok || obj.index == nil {
 					continue
 				}
 
@@ -447,21 +450,27 @@ func (t *File) readMetadata() error {
 						offset:        obj.index.offset + int64(chunkIdx*segment.metadata.chunkSize),
 						isInterleaved: segment.leadIn.isInterleaved,
 						order:         segment.leadIn.byteOrder,
-						chunkSize:     segment.metadata.chunkSize,
+						size:          obj.index.totalSize,
 						numValues:     obj.index.numValues,
 						stride:        obj.index.stride,
 					})
 				}
 			}
 
+			totalNumValues := uint64(0)
+			for _, chunk := range chunks {
+				totalNumValues += chunk.numValues
+			}
+
 			channels[channelName] = Channel{
-				Name:       channelName,
-				GroupName:  groupName,
-				DataType:   obj.index.dataType,
-				Properties: obj.properties,
-				f:          t,
-				path:       obj.path,
-				dataChunks: chunks,
+				Name:           channelName,
+				GroupName:      groupName,
+				DataType:       obj.index.dataType,
+				Properties:     obj.properties,
+				f:              t,
+				path:           obj.path,
+				dataChunks:     chunks,
+				totalNumValues: totalNumValues,
 			}
 		}
 	}
@@ -631,7 +640,6 @@ func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error)
 		obj.index = nil
 		rawDataIndexPresent = false
 	case rawIndexHeaderMatchesPreviousValue:
-		// TODO: Should we be checking the prior segment or the whole file?
 		if existingObj, ok := prevSegment.metadata.objects[obj.path]; ok {
 			// We don't bother copying the index because we won't change it.
 			obj.index = existingObj.index
@@ -780,55 +788,208 @@ func (ch *Channel) Group() Group {
 	return ch.f.Groups[ch.GroupName]
 }
 
-func (ch *Channel) ReadDataAsInt8(batchSize int) iter.Seq2[int8, error] {
-	return StreamReader(ch, batchSize, DataTypeInt8, interpretInt8)
+type readOptions struct {
+	batchSize int
 }
 
-func (ch *Channel) ReadDataAsInt16(batchSize int) iter.Seq2[int16, error] {
-	return StreamReader(ch, batchSize, DataTypeInt16, interpretInt16)
+type ReadOption func(*readOptions)
+
+func BatchSize(batchSize int) ReadOption {
+	return func(opts *readOptions) {
+		opts.batchSize = batchSize
+	}
 }
 
-func (ch *Channel) ReadDataAsInt32(batchSize int) iter.Seq2[int32, error] {
-	return StreamReader(ch, batchSize, DataTypeInt32, interpretInt32)
+// Data streaming functions that yield each item at a time.
+
+func (ch *Channel) ReadDataAsInt8(options ...ReadOption) iter.Seq2[int8, error] {
+	return StreamReader(ch, options, DataTypeInt8, interpretInt8)
 }
 
-func (ch *Channel) ReadDataAsInt64(batchSize int) iter.Seq2[int64, error] {
-	return StreamReader(ch, batchSize, DataTypeInt64, interpretInt64)
+func (ch *Channel) ReadDataAsInt16(options ...ReadOption) iter.Seq2[int16, error] {
+	return StreamReader(ch, options, DataTypeInt16, interpretInt16)
 }
 
-func (ch *Channel) ReadDataAsUint8(batchSize int) iter.Seq2[uint8, error] {
-	return StreamReader(ch, batchSize, DataTypeUint8, interpretUint8)
+func (ch *Channel) ReadDataAsInt32(options ...ReadOption) iter.Seq2[int32, error] {
+	return StreamReader(ch, options, DataTypeInt32, interpretInt32)
 }
 
-func (ch *Channel) ReadDataAsUint16(batchSize int) iter.Seq2[uint16, error] {
-	return StreamReader(ch, batchSize, DataTypeUint16, interpretUint16)
+func (ch *Channel) ReadDataAsInt64(options ...ReadOption) iter.Seq2[int64, error] {
+	return StreamReader(ch, options, DataTypeInt64, interpretInt64)
 }
 
-func (ch *Channel) ReadDataAsUint32(batchSize int) iter.Seq2[uint32, error] {
-	return StreamReader(ch, batchSize, DataTypeUint32, interpretUint32)
+func (ch *Channel) ReadDataAsUint8(options ...ReadOption) iter.Seq2[uint8, error] {
+	return StreamReader(ch, options, DataTypeUint8, interpretUint8)
 }
 
-func (ch *Channel) ReadDataAsUint64(batchSize int) iter.Seq2[uint64, error] {
-	return StreamReader(ch, batchSize, DataTypeUint64, interpretUint64)
+func (ch *Channel) ReadDataAsUint16(options ...ReadOption) iter.Seq2[uint16, error] {
+	return StreamReader(ch, options, DataTypeUint16, interpretUint16)
 }
 
-func (ch *Channel) ReadDataAsFloat32(batchSize int) iter.Seq2[float32, error] {
-	return StreamReader(ch, batchSize, DataTypeFloat32, interpretFloat32)
+func (ch *Channel) ReadDataAsUint32(options ...ReadOption) iter.Seq2[uint32, error] {
+	return StreamReader(ch, options, DataTypeUint32, interpretUint32)
 }
 
-func (ch *Channel) ReadDataAsFloat64(batchSize int) iter.Seq2[float64, error] {
-	return StreamReader(ch, batchSize, DataTypeFloat64, interpretFloat64)
+func (ch *Channel) ReadDataAsUint64(options ...ReadOption) iter.Seq2[uint64, error] {
+	return StreamReader(ch, options, DataTypeUint64, interpretUint64)
 }
 
-func (ch *Channel) ReadDataAsString(batchSize int) iter.Seq2[string, error] {
-	// This won't work, as string is a variable-width data type where the
-	return StreamReader(ch, batchSize, DataTypeString, interpretString)
+func (ch *Channel) ReadDataAsFloat32(options ...ReadOption) iter.Seq2[float32, error] {
+	return StreamReader(ch, options, DataTypeFloat32, interpretFloat32)
 }
 
-func (ch *Channel) ReadDataAsComplex64(batchSize int) iter.Seq2[complex64, error] {
-	return StreamReader(ch, batchSize, DataTypeComplex64, interpretComplex64)
+func (ch *Channel) ReadDataAsFloat64(options ...ReadOption) iter.Seq2[float64, error] {
+	return StreamReader(ch, options, DataTypeFloat64, interpretFloat64)
 }
 
-func (ch *Channel) ReadDataAsComplex128(batchSize int) iter.Seq2[complex128, error] {
-	return StreamReader(ch, batchSize, DataTypeComplex128, interpretComplex128)
+func (ch *Channel) ReadDataAsString(options ...ReadOption) iter.Seq2[string, error] {
+	return StreamReader(ch, options, DataTypeString, interpretString)
+}
+
+func (ch *Channel) ReadDataAsBool(options ...ReadOption) iter.Seq2[bool, error] {
+	return StreamReader(ch, options, DataTypeBool, interpretBool)
+}
+
+func (ch *Channel) ReadDataAsTime(options ...ReadOption) iter.Seq2[time.Time, error] {
+	return StreamReader(ch, options, DataTypeTime, interpretTime)
+}
+
+func (ch *Channel) ReadDataAsComplex64(options ...ReadOption) iter.Seq2[complex64, error] {
+	return StreamReader(ch, options, DataTypeComplex64, interpretComplex64)
+}
+
+func (ch *Channel) ReadDataAsComplex128(options ...ReadOption) iter.Seq2[complex128, error] {
+	return StreamReader(ch, options, DataTypeComplex128, interpretComplex128)
+}
+
+// Data streaming functions that yield items in batches.
+
+func (ch *Channel) ReadDataAsInt8Batch(options ...ReadOption) iter.Seq2[[]int8, error] {
+	return BatchStreamReader(ch, options, DataTypeInt8, interpretInt8)
+}
+
+func (ch *Channel) ReadDataAsInt16Batch(options ...ReadOption) iter.Seq2[[]int16, error] {
+	return BatchStreamReader(ch, options, DataTypeInt16, interpretInt16)
+}
+
+func (ch *Channel) ReadDataAsInt32Batch(options ...ReadOption) iter.Seq2[[]int32, error] {
+	return BatchStreamReader(ch, options, DataTypeInt32, interpretInt32)
+}
+
+func (ch *Channel) ReadDataAsInt64Batch(options ...ReadOption) iter.Seq2[[]int64, error] {
+	return BatchStreamReader(ch, options, DataTypeInt64, interpretInt64)
+}
+
+func (ch *Channel) ReadDataAsUint8Batch(options ...ReadOption) iter.Seq2[[]uint8, error] {
+	return BatchStreamReader(ch, options, DataTypeUint8, interpretUint8)
+}
+
+func (ch *Channel) ReadDataAsUint16Batch(options ...ReadOption) iter.Seq2[[]uint16, error] {
+	return BatchStreamReader(ch, options, DataTypeUint16, interpretUint16)
+}
+
+func (ch *Channel) ReadDataAsUint32Batch(options ...ReadOption) iter.Seq2[[]uint32, error] {
+	return BatchStreamReader(ch, options, DataTypeUint32, interpretUint32)
+}
+
+func (ch *Channel) ReadDataAsUint64Batch(options ...ReadOption) iter.Seq2[[]uint64, error] {
+	return BatchStreamReader(ch, options, DataTypeUint64, interpretUint64)
+}
+
+func (ch *Channel) ReadDataAsFloat32Batch(options ...ReadOption) iter.Seq2[[]float32, error] {
+	return BatchStreamReader(ch, options, DataTypeFloat32, interpretFloat32)
+}
+
+func (ch *Channel) ReadDataAsFloat64Batch(options ...ReadOption) iter.Seq2[[]float64, error] {
+	return BatchStreamReader(ch, options, DataTypeFloat64, interpretFloat64)
+}
+
+func (ch *Channel) ReadDataAsFloat128Batch(options ...ReadOption) iter.Seq2[[]Float128, error] {
+	return BatchStreamReader(ch, options, DataTypeFloat128, interpretFloat128)
+}
+
+func (ch *Channel) ReadDataAsStringBatch(options ...ReadOption) iter.Seq2[[]string, error] {
+	return BatchStreamReader(ch, options, DataTypeString, interpretString)
+}
+
+func (ch *Channel) ReadDataAsBoolBatch(options ...ReadOption) iter.Seq2[[]bool, error] {
+	return BatchStreamReader(ch, options, DataTypeBool, interpretBool)
+}
+
+func (ch *Channel) ReadDataAsTimeBatch(options ...ReadOption) iter.Seq2[[]time.Time, error] {
+	return BatchStreamReader(ch, options, DataTypeTime, interpretTime)
+}
+
+func (ch *Channel) ReadDataAsComplex64Batch(options ...ReadOption) iter.Seq2[[]complex64, error] {
+	return BatchStreamReader(ch, options, DataTypeComplex64, interpretComplex64)
+}
+
+func (ch *Channel) ReadDataAsComplex128Batch(options ...ReadOption) iter.Seq2[[]complex128, error] {
+	return BatchStreamReader(ch, options, DataTypeComplex128, interpretComplex128)
+}
+
+// Data streaming functions that read all the whole for a channel in one go.
+
+func (ch *Channel) ReadDataInt8All(options ...ReadOption) ([]int8, error) {
+	return readAllData(ch, options, DataTypeInt8, interpretInt8)
+}
+
+func (ch *Channel) ReadDataInt16All(options ...ReadOption) ([]int16, error) {
+	return readAllData(ch, options, DataTypeInt16, interpretInt16)
+}
+
+func (ch *Channel) ReadDataInt32All(options ...ReadOption) ([]int32, error) {
+	return readAllData(ch, options, DataTypeInt32, interpretInt32)
+}
+
+func (ch *Channel) ReadDataInt64All(options ...ReadOption) ([]int64, error) {
+	return readAllData(ch, options, DataTypeInt64, interpretInt64)
+}
+
+func (ch *Channel) ReadDataUint8All(options ...ReadOption) ([]uint8, error) {
+	return readAllData(ch, options, DataTypeUint8, interpretUint8)
+}
+
+func (ch *Channel) ReadDataUint16All(options ...ReadOption) ([]uint16, error) {
+	return readAllData(ch, options, DataTypeUint16, interpretUint16)
+}
+
+func (ch *Channel) ReadDataUint32All(options ...ReadOption) ([]uint32, error) {
+	return readAllData(ch, options, DataTypeUint32, interpretUint32)
+}
+
+func (ch *Channel) ReadDataUint64All(options ...ReadOption) ([]uint64, error) {
+	return readAllData(ch, options, DataTypeUint64, interpretUint64)
+}
+
+func (ch *Channel) ReadDataFloat32All(options ...ReadOption) ([]float32, error) {
+	return readAllData(ch, options, DataTypeFloat32, interpretFloat32)
+}
+
+func (ch *Channel) ReadDataFloat64All(options ...ReadOption) ([]float64, error) {
+	return readAllData(ch, options, DataTypeFloat64, interpretFloat64)
+}
+
+func (ch *Channel) ReadDataFloat128All(options ...ReadOption) ([]Float128, error) {
+	return readAllData(ch, options, DataTypeFloat128, interpretFloat128)
+}
+
+func (ch *Channel) ReadDataStringAll(options ...ReadOption) ([]string, error) {
+	return readAllData(ch, options, DataTypeString, interpretString)
+}
+
+func (ch *Channel) ReadDataBoolAll(options ...ReadOption) ([]bool, error) {
+	return readAllData(ch, options, DataTypeBool, interpretBool)
+}
+
+func (ch *Channel) ReadDataTimeAll(options ...ReadOption) ([]time.Time, error) {
+	return readAllData(ch, options, DataTypeTime, interpretTime)
+}
+
+func (ch *Channel) ReadDataComplex64All(options ...ReadOption) ([]complex64, error) {
+	return readAllData(ch, options, DataTypeComplex64, interpretComplex64)
+}
+
+func (ch *Channel) ReadDataComplex128All(options ...ReadOption) ([]complex128, error) {
+	return readAllData(ch, options, DataTypeComplex128, interpretComplex128)
 }
