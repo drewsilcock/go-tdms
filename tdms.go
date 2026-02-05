@@ -59,7 +59,7 @@ const segmentIncomplete uint64 = 0xff_ff_ff_ff_ff_ff_ff_ff
 
 const (
 	leadInSize uint64 = 28
-	scalerSize        = 16
+	scalerSize uint32 = 16
 )
 
 var (
@@ -114,7 +114,6 @@ type Channel struct {
 	f              *File
 	path           string
 	dataChunks     []dataChunk
-	totalSize      uint64
 	totalNumValues uint64
 }
 
@@ -536,6 +535,8 @@ func (t *File) readSegmentMetadata(segmentOffset int64, leadIn *leadIn, prevSegm
 			// updated; properties not mentioned in the latest segment are
 			// unchanged.
 			maps.Copy(existingObj.properties, obj.properties)
+
+			m.objects[obj.path] = existingObj
 		} else {
 			// You can still add new objects to the list without the new
 			// object list flag.

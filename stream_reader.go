@@ -148,7 +148,7 @@ func BatchStreamReader[T any](
 
 				n := 0
 				var err error
-				if chunk.isInterleaved == false {
+				if !chunk.isInterleaved {
 					n, err = io.ReadFull(r, buf)
 				} else {
 					// You aren't allowed to have interleaved variable-length

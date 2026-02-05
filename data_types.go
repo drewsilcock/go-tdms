@@ -99,10 +99,6 @@ func (dt DataType) Name() string {
 	}
 }
 
-// This is the TDMS epoch as a unix timestamp. To convert from a TDMS timestamp
-// to a unix timestamp, you can simply do `tdmsTimestamp + tdmsEpoch`.
-const tdmsEpoch int64 = -2_082_844_800
-
 func readValue(typeCode DataType, reader io.Reader, byteOrder binary.ByteOrder) (any, error) {
 	switch typeCode {
 	case DataTypeVoid:

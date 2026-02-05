@@ -13,14 +13,6 @@ import (
 // This code would be much simpler if we used `binary.Read()`, but that function
 // is very slow because it uses reflection.
 
-// interpretBytes does not do anything to handle the byte order and just returns
-// the same array that you put in, copied into a new array.
-func interpretBytes(bytes []byte, order binary.ByteOrder) []byte {
-	ret := make([]byte, len(bytes))
-	copy(ret, bytes)
-	return ret
-}
-
 func readInt8(reader io.Reader, order binary.ByteOrder) (int8, error) {
 	valueBytes := make([]byte, 1)
 	if _, err := reader.Read(valueBytes); err != nil {
@@ -171,10 +163,6 @@ func readComplex128(reader io.Reader, order binary.ByteOrder) (complex128, error
 }
 
 // Interpret functions - convert byte slices to their respective types
-
-func interpretVoid(bytes []byte, order binary.ByteOrder) struct{} {
-	return struct{}{}
-}
 
 func interpretInt8(bytes []byte, order binary.ByteOrder) int8 {
 	return int8(bytes[0])
