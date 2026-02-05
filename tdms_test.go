@@ -63,7 +63,7 @@ func buildTestCases() []testCase {
 									{
 										offset:    111,
 										order:     binary.LittleEndian,
-										chunkSize: 400,
+										size:      400,
 										numValues: 100,
 									},
 								},
