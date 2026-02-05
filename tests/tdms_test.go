@@ -1,12 +1,14 @@
 package tdms
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
 	"math/cmplx"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/drewsilcock/go-tdms"
@@ -116,7 +118,9 @@ func loadManifest(t *testing.T, testDataDir string) *Manifest {
 	}
 
 	var manifest Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber() // Preserve precision for large integers
+	if err := decoder.Decode(&manifest); err != nil {
 		t.Fatalf("Failed to parse manifest: %v", err)
 	}
 
@@ -143,6 +147,12 @@ func toFloat64Slice(t *testing.T, data any) []float64 {
 	result := make([]float64, len(slice))
 	for i, v := range slice {
 		switch val := v.(type) {
+		case json.Number:
+			num, err := val.Float64()
+			if err != nil {
+				t.Fatalf("Failed to parse json.Number to float64: %v", err)
+			}
+			result[i] = num
 		case float64:
 			result[i] = val
 		case int:
@@ -182,6 +192,12 @@ func toInt32Slice(t *testing.T, data any) []int32 {
 	result := make([]int32, len(slice))
 	for i, v := range slice {
 		switch val := v.(type) {
+		case json.Number:
+			num, err := strconv.ParseInt(string(val), 10, 32)
+			if err != nil {
+				t.Fatalf("Failed to parse json.Number to int32: %v", err)
+			}
+			result[i] = int32(num)
 		case float64:
 			result[i] = int32(val)
 		case int:
@@ -209,6 +225,12 @@ func toInt64Slice(t *testing.T, data any) []int64 {
 	result := make([]int64, len(slice))
 	for i, v := range slice {
 		switch val := v.(type) {
+		case json.Number:
+			num, err := strconv.ParseInt(string(val), 10, 64)
+			if err != nil {
+				t.Fatalf("Failed to parse json.Number to int64: %v", err)
+			}
+			result[i] = num
 		case float64:
 			result[i] = int64(val)
 		case int:
@@ -236,6 +258,12 @@ func toUint8Slice(t *testing.T, data any) []uint8 {
 	result := make([]uint8, len(slice))
 	for i, v := range slice {
 		switch val := v.(type) {
+		case json.Number:
+			num, err := strconv.ParseUint(string(val), 10, 8)
+			if err != nil {
+				t.Fatalf("Failed to parse json.Number to uint8: %v", err)
+			}
+			result[i] = uint8(num)
 		case float64:
 			result[i] = uint8(val)
 		case int:
@@ -263,6 +291,12 @@ func toUint32Slice(t *testing.T, data any) []uint32 {
 	result := make([]uint32, len(slice))
 	for i, v := range slice {
 		switch val := v.(type) {
+		case json.Number:
+			num, err := strconv.ParseUint(string(val), 10, 32)
+			if err != nil {
+				t.Fatalf("Failed to parse json.Number to uint32: %v", err)
+			}
+			result[i] = uint32(num)
 		case float64:
 			result[i] = uint32(val)
 		case int:
@@ -341,8 +375,28 @@ func toComplex128Slice(t *testing.T, data any) []complex128 {
 		if !ok {
 			t.Fatalf("Expected map for complex value, got %T", v)
 		}
-		real, _ := m["real"].(float64)
-		imag, _ := m["imag"].(float64)
+
+		var real, imag float64
+		if realNum, ok := m["real"].(json.Number); ok {
+			var err error
+			real, err = realNum.Float64()
+			if err != nil {
+				t.Fatalf("Failed to parse real part as float64: %v", err)
+			}
+		} else if realFloat, ok := m["real"].(float64); ok {
+			real = realFloat
+		}
+
+		if imagNum, ok := m["imag"].(json.Number); ok {
+			var err error
+			imag, err = imagNum.Float64()
+			if err != nil {
+				t.Fatalf("Failed to parse imag part as float64: %v", err)
+			}
+		} else if imagFloat, ok := m["imag"].(float64); ok {
+			imag = imagFloat
+		}
+
 		result[i] = complex(real, imag)
 	}
 	return result
@@ -776,7 +830,6 @@ func testUint64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 		return
 	}
 
-	// JSON numbers might lose precision for uint64, so we need careful handling
 	slice, ok := expected.Data.([]any)
 	if !ok {
 		t.Errorf("Expected []any for data, got %T", expected.Data)
@@ -792,6 +845,13 @@ func testUint64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 	for i := range data {
 		var expectedVal uint64
 		switch v := slice[i].(type) {
+		case json.Number:
+			num, err := strconv.ParseUint(string(v), 10, 64)
+			if err != nil {
+				t.Errorf("Failed to parse json.Number to uint64: %v", err)
+				continue
+			}
+			expectedVal = num
 		case float64:
 			expectedVal = uint64(v)
 		case int:
@@ -1054,8 +1114,31 @@ func mapDataType(s string) tdms.DataType {
 // comparePropertyValue compares a property value from the file with expected value from JSON
 func comparePropertyValue(actual any, expected any) bool {
 	switch e := expected.(type) {
+	case json.Number:
+		// Handle json.Number from UseNumber() decoder
+		// Try to parse as float64 for comparison
+		expectedFloat, err := e.Float64()
+		if err != nil {
+			return false
+		}
+		switch a := actual.(type) {
+		case float64:
+			return floatEquals(a, expectedFloat, 1e-9)
+		case float32:
+			return floatEquals(float64(a), expectedFloat, 1e-6)
+		case int:
+			return float64(a) == expectedFloat
+		case int32:
+			return float64(a) == expectedFloat
+		case int64:
+			return float64(a) == expectedFloat
+		case uint32:
+			return float64(a) == expectedFloat
+		case uint64:
+			return float64(a) == expectedFloat
+		}
 	case float64:
-		// JSON numbers are always float64
+		// JSON numbers might still be float64 in some cases
 		switch a := actual.(type) {
 		case float64:
 			return floatEquals(a, e, 1e-9)
@@ -1185,10 +1268,9 @@ func TestScalingProperties(t *testing.T) {
 						continue
 					}
 
-					expectedNum, _ := numScales.(float64)
-					if !comparePropertyValue(prop.Value, expectedNum) {
+					if !comparePropertyValue(prop.Value, numScales) {
 						t.Errorf("Channel %s/%s: NI_Number_Of_Scales mismatch: expected %v, got %v",
-							expectedCh.Group, expectedCh.Channel, expectedNum, prop.Value)
+							expectedCh.Group, expectedCh.Channel, numScales, prop.Value)
 					}
 				}
 
