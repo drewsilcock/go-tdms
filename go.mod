@@ -1,5 +1,6 @@
 module github.com/drewsilcock/go-tdms
 
-go 1.25.5
+// Support the most recent 2 Go versions (this is what the Go team support).
+go 1.24
 
 require github.com/google/go-cmp v0.7.0 // indirect
