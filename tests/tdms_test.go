@@ -394,7 +394,9 @@ func TestTDMSFilesFromManifest(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to open TDMS file %s: %v", tc.Filename, err)
 			}
-			defer f.Close()
+			defer func(f *tdms.File) {
+				_ = f.Close()
+			}(f)
 
 			// Run sub-tests
 			t.Run("Groups", func(t *testing.T) {
@@ -1102,7 +1104,9 @@ func TestMultipleSegments(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to open file: %v", err)
 			}
-			defer f.Close()
+			defer func(f *tdms.File) {
+				_ = f.Close()
+			}(f)
 
 			// For multiple segment tests, verify that all data from all segments
 			// is correctly concatenated
@@ -1156,7 +1160,9 @@ func TestScalingProperties(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to open file: %v", err)
 			}
-			defer f.Close()
+			defer func(f *tdms.File) {
+				_ = f.Close()
+			}(f)
 
 			// Verify scaling properties are correctly parsed
 			for _, expectedCh := range tc.Channels {
@@ -1219,7 +1225,9 @@ func TestEmptyChannels(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to open file: %v", err)
 			}
-			defer f.Close()
+			defer func(f *tdms.File) {
+				_ = f.Close()
+			}(f)
 
 			for _, expectedCh := range tc.Channels {
 				if expectedCh.Length != 0 {
@@ -1267,7 +1275,9 @@ func TestSpecialCharacterNames(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to open file: %v", err)
 			}
-			defer f.Close()
+			defer func(f *tdms.File) {
+				_ = f.Close()
+			}(f)
 
 			// Verify all groups with special names are found
 			for _, expectedGroup := range tc.Groups {
