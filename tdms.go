@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"maps"
 	"os"
 	"strings"
@@ -53,7 +54,12 @@ const (
 	rawIndexHeaderDigitalLineScaler uint32 = 0x00_00_12_6a
 )
 
-const leadInSize uint64 = 28
+const segmentIncomplete uint64 = 0xff_ff_ff_ff_ff_ff_ff_ff
+
+const (
+	leadInSize uint64 = 28
+	scalerSize        = 16
+)
 
 var (
 	tdmsMagicBytes      = []byte{'T', 'D', 'S', 'm'}
@@ -104,8 +110,15 @@ type Channel struct {
 	DataType   DataType
 	Properties map[string]Property
 
-	f *File
-	path string
+	f          *File
+	path       string
+	dataChunks []dataChunk
+}
+
+type segment struct {
+	offset   int64
+	leadIn   *leadIn
+	metadata *metadata
 }
 
 type leadIn struct {
@@ -120,10 +133,17 @@ type leadIn struct {
 }
 
 type metadata struct {
+	objects map[string]object
+
 	// The order of objects is essential for reading the data because the data
 	// is present in the same order as the objects that they correspond to.
-	objectMap  map[string]*object
-	objectList []*object
+	objectOrder []string
+
+	// Segments can contain multiple chunks of data; where the lead in/metadata
+	// of the segment remains unchanged, you can simply write additional chunks
+	// of data (either interleaved or non-interleaved) one after the other.
+	numChunks uint64
+	chunkSize uint64
 }
 
 type daqmxScalerType int
@@ -135,24 +155,59 @@ const (
 )
 
 type object struct {
-	path         string
-	rawDataIndex *rawDataIndex
-	isDaqmxIndex bool
-	properties   map[string]Property
-	hasRawData   bool
+	path string
+
+	// If index is nil, that means there's no raw data for this object.
+	index      *objectIndex
+	properties map[string]Property
 }
 
-type rawDataIndex struct {
-	scaler    daqmxScalerType
-	dataType  DataType
-	numValues uint64
+type objectIndex struct {
+	// If scaler type is none, that means this is not DAQmx data. Otherwise, it
+	// is.
+	scalerType daqmxScalerType
+	dataType   DataType
+	numValues  uint64
 
-	// Only stored for variable length data types, e.g. strings, and not stored
-	// for DAQmx raw data index.
+	// For variable-size data types, e.g. strings, this is taken from the file
+	// itself. Otherwise, it is calculated from data type size and number of
+	// values. This refers to the total size of this channel in bytes for a
+	// single chunk.
 	totalSize uint64
 
-	// These are only stored for DAQmx raw data indexes.
+	// Only stored for DAQmx raw data.
 	scalers []daqmxScaler
+
+	// Only stored for DAQmx raw data.
+	widths []uint32
+
+	// Offset is the absolute offset from the beginning of the file.
+	offset int64
+
+	// Stride is the distance from one data point to the next, when the data is
+	// interleaved. It is equal to the size of a single datum for all objects
+	// other than the current object.
+	stride int64
+}
+
+// dataChunk is similar to objectIndex, but is a single object index can
+// correspond to multiple chunks whereas a single dataChunk instance corresponds
+// to a single raw data chunk in the TDMS file.
+//
+// Note that a dataChunk instance is specific to an individual object, meaning a
+// segment in a TDMS file with 2 channels and 3 chunks will have 6 dataChunk
+// instances corresponding to it.
+//
+// This is purely for ease of use
+// to make reading simpler and to keep all the necessary information self-contained.
+type dataChunk struct {
+	// offset is absolute from the start of the file
+	offset        int64
+	isInterleaved bool
+	order         binary.ByteOrder
+	chunkSize     uint64 // Do we need this?
+	numValues     uint64
+	stride        int64
 }
 
 type daqmxScaler struct {
@@ -166,12 +221,6 @@ type daqmxScaler struct {
 	rawByteOffsetWithinStride uint32
 	sampleFormatBitmap        uint32
 	scaleID                   uint32
-}
-
-type segment struct {
-	offset   int64
-	leadIn   *leadIn
-	metadata *metadata
 }
 
 func New(reader io.ReadSeeker, isIndex bool, size int64) (*File, error) {
@@ -311,7 +360,7 @@ func (t *File) readMetadata() error {
 		}
 
 		if leadIn.containsMetadata {
-			metadata, err := t.readSegmentMetadata(leadIn, prevSegment)
+			metadata, err := t.readSegmentMetadata(currentOffset, leadIn, prevSegment)
 			if err != nil {
 				return fmt.Errorf("failed to read segment %d metadata: %w", i, err)
 			}
@@ -321,13 +370,14 @@ func (t *File) readMetadata() error {
 				leadIn:   leadIn,
 				metadata: metadata,
 			}
+
 			t.segments = append(t.segments, *prevSegment)
 		}
 
 		// The next segment offset is the offset from the end of the lead in.
 		currentOffset += int64(leadIn.nextSegmentOffset) + int64(leadInSize)
 
-		if leadIn.nextSegmentOffset == 0xFFFFFFFFFFFFFFFF {
+		if leadIn.nextSegmentOffset == segmentIncomplete {
 			// Special value indicates that LabVIEW crashes while writing the final segment.
 			t.IsIncomplete = true
 			break
@@ -377,13 +427,41 @@ func (t *File) readMetadata() error {
 			}
 		} else {
 			// This is a channel object, so add it to the group's channels.
+
+			// Pre-compute the positions and metadata for each data chunk that
+			// this channel has, if any. This makes reading data for this
+			// channel much simpler.
+			chunks := make([]dataChunk, 0, len(t.segments))
+			for _, segment := range t.segments {
+				if !segment.leadIn.containsRawData {
+					continue
+				}
+
+				obj, ok := segment.metadata.objects[obj.path]
+				if !ok {
+					continue
+				}
+
+				for chunkIdx := range segment.metadata.numChunks {
+					chunks = append(chunks, dataChunk{
+						offset:        obj.index.offset + int64(chunkIdx*segment.metadata.chunkSize),
+						isInterleaved: segment.leadIn.isInterleaved,
+						order:         segment.leadIn.byteOrder,
+						chunkSize:     segment.metadata.chunkSize,
+						numValues:     obj.index.numValues,
+						stride:        obj.index.stride,
+					})
+				}
+			}
+
 			channels[channelName] = Channel{
 				Name:       channelName,
 				GroupName:  groupName,
-				DataType:   obj.rawDataIndex.dataType,
+				DataType:   obj.index.dataType,
 				Properties: obj.properties,
 				f:          t,
-				path: obj.path,
+				path:       obj.path,
+				dataChunks: chunks,
 			}
 		}
 	}
@@ -403,14 +481,16 @@ func (t *File) readMetadata() error {
 	return nil
 }
 
-func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metadata, error) {
+func (t *File) readSegmentMetadata(segmentOffset int64, leadIn *leadIn, prevSegment *segment) (*metadata, error) {
 	numObjects, err := readUint32(t.f, leadIn.byteOrder)
 	if err != nil {
 		return nil, err
 	}
 
-	objectList := make([]*object, 0, numObjects)
-	objectMap := make(map[string]*object, numObjects)
+	m := metadata{
+		objects:     make(map[string]object, numObjects),
+		objectOrder: make([]string, 0, numObjects),
+	}
 
 	if !leadIn.newObjectList {
 		if prevSegment == nil {
@@ -420,10 +500,9 @@ func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metad
 			)
 		}
 
-		for _, existingObj := range prevSegment.metadata.objectList {
-			// We may want to update this object without changing the values in the previous segment.
-			obj := *existingObj
-			objectList = append(objectList, &obj)
+		for _, existingObjPath := range prevSegment.metadata.objectOrder {
+			m.objectOrder = append(m.objectOrder, existingObjPath)
+			m.objects[existingObjPath] = prevSegment.metadata.objects[existingObjPath]
 		}
 	}
 
@@ -437,18 +516,11 @@ func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metad
 		// same path, this will overwrite the object with the last value in the
 		// metadata. This is acceptable as this would be against the spec
 		// anyways.
-		if existingObj, ok := objectMap[obj.path]; ok {
-			// At the root level, an object has raw data if it has raw data for
-			// any segment. This is one example of why we can't simply use a
-			// single object instance for both root-level and segment-level
-			// objects.
-			existingObj.hasRawData = obj.hasRawData
-			existingObj.isDaqmxIndex = obj.isDaqmxIndex
-
+		if existingObj, ok := m.objects[obj.path]; ok {
 			// If new object has no raw data, we keep the raw data index from
 			// the previous segment.
-			if obj.hasRawData {
-				existingObj.rawDataIndex = obj.rawDataIndex
+			if obj.index != nil {
+				existingObj.index = obj.index
 			}
 
 			// New properties get added to the map while existing properties get
@@ -458,8 +530,8 @@ func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metad
 		} else {
 			// You can still add new objects to the list without the new
 			// object list flag.
-			objectList = append(objectList, obj)
-			objectMap[obj.path] = obj
+			m.objectOrder = append(m.objectOrder, obj.path)
+			m.objects[obj.path] = *obj
 		}
 
 		// If this object already exists in the file's collection of properties
@@ -469,16 +541,19 @@ func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metad
 		// list of objects. We need to merge properties but replace raw
 		// data index.
 		if existingObj, ok := t.objects[obj.path]; ok {
-			// At the top-level, if any segment has raw data for the object,
-			// then the object has raw data.
-			existingObj.hasRawData = existingObj.hasRawData || obj.hasRawData
-
-			if obj.rawDataIndex != nil {
+			// At the top-level, the raw data index has very little significance
+			// as it is very much segment-specific. The only useful piece of
+			// information is the data type, which is forbidden from changing
+			// from one segment to the next for a specific object. This sets the
+			// index equal to the last non-nil value, which you can use to
+			// extract data type and scalers. It's not clear if scalers can
+			// change from one segment to the next, which implies we have to
+			// handle this as an edge case; you should thus be using
+			// segment-specific objects for that information.
+			if obj.index != nil {
 				// It's OK to use the same pointer here because we only replace
 				// the index, not update it.
-				existingObj.rawDataIndex = obj.rawDataIndex
-
-				existingObj.isDaqmxIndex = obj.isDaqmxIndex
+				existingObj.index = obj.index
 			}
 
 			maps.Copy(existingObj.properties, obj.properties)
@@ -498,7 +573,41 @@ func (t *File) readSegmentMetadata(leadIn *leadIn, prevSegment *segment) (*metad
 		}
 	}
 
-	return &metadata{objectList: objectList, objectMap: objectMap}, nil
+	// Calculate the number of chunks based on the next segment offset and
+	// the total size of each chunk.
+	m.chunkSize = 0
+	for _, obj := range m.objects {
+		if obj.index != nil {
+			m.chunkSize += obj.index.totalSize
+		}
+	}
+
+	totalRawDataSize := leadIn.nextSegmentOffset - leadIn.rawDataOffset
+	if leadIn.nextSegmentOffset == segmentIncomplete {
+		rawDataAbsolutePosition := uint64(segmentOffset) + leadInSize + leadIn.rawDataOffset
+		totalRawDataSize = uint64(t.size) - rawDataAbsolutePosition
+	}
+
+	m.numChunks = totalRawDataSize / m.chunkSize
+
+	// Calculate the offset from the start of the segment to the first data
+	// point for the object, as well as the "stride" between successive data
+	// points when the data is interleaved. The stride isn't useful when the
+	// data is not interleaved, but it's cheap to calculate.
+	dataOffset := segmentOffset + int64(leadInSize+leadIn.rawDataOffset)
+	for _, objectPath := range m.objectOrder {
+		obj := m.objects[objectPath]
+		if obj.index == nil || obj.index.totalSize == 0 {
+			continue
+		}
+
+		obj.index.offset = dataOffset
+		dataOffset += int64(obj.index.totalSize)
+
+		obj.index.stride = int64(m.chunkSize - obj.index.totalSize)
+	}
+
+	return &m, nil
 }
 
 func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error) {
@@ -519,26 +628,23 @@ func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error)
 
 	switch rawDataIndexHeader {
 	case rawIndexHeaderNoRawData:
-		obj.hasRawData = false
+		obj.index = nil
 		rawDataIndexPresent = false
 	case rawIndexHeaderMatchesPreviousValue:
 		// TODO: Should we be checking the prior segment or the whole file?
-		if existingObj, ok := prevSegment.metadata.objectMap[obj.path]; ok {
-			obj.hasRawData = existingObj.hasRawData
-			obj.isDaqmxIndex = existingObj.isDaqmxIndex
-			obj.rawDataIndex = existingObj.rawDataIndex
+		if existingObj, ok := prevSegment.metadata.objects[obj.path]; ok {
+			// We don't bother copying the index because we won't change it.
+			obj.index = existingObj.index
 		} else {
 			return nil, errors.New("raw data index matches previous value but no prior object found")
 		}
 
 		rawDataIndexPresent = false
 	case rawIndexHeaderFormatChangingScaler:
-		obj.rawDataIndex = &rawDataIndex{scaler: daqmxScalerTypeFormatChanging}
-		obj.isDaqmxIndex = true
+		obj.index = &objectIndex{scalerType: daqmxScalerTypeFormatChanging}
 		rawDataIndexPresent = true
 	case rawIndexHeaderDigitalLineScaler:
-		obj.rawDataIndex = &rawDataIndex{scaler: daqmxScalerTypeDigitalLine}
-		obj.isDaqmxIndex = true
+		obj.index = &objectIndex{scalerType: daqmxScalerTypeDigitalLine}
 		rawDataIndexPresent = true
 	default:
 		// Value is the length of the raw data index. This value seems pointless
@@ -547,9 +653,7 @@ func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error)
 		// from the special values above, although it seems they should've then
 		// used a special value to indicate "this is a normal raw data index".
 		// It's probably historical.
-		obj.rawDataIndex = &rawDataIndex{scaler: daqmxScalerTypeNone}
-		obj.hasRawData = true
-		obj.isDaqmxIndex = false
+		obj.index = &objectIndex{scalerType: daqmxScalerTypeNone}
 		rawDataIndexPresent = true
 	}
 
@@ -560,7 +664,16 @@ func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error)
 			return nil, errors.Join(ErrReadFailed, err)
 		}
 
-		obj.rawDataIndex.dataType = DataType(leadIn.byteOrder.Uint32(rawDataIndexBytes))
+		obj.index.dataType = DataType(leadIn.byteOrder.Uint32(rawDataIndexBytes))
+
+		// It is explicitly prohibited to have an interleaved segment with
+		// variable-width data types.
+		if obj.index.dataType == DataTypeString && leadIn.isInterleaved {
+			return nil, fmt.Errorf(
+				"%w: interleaved segments are not allowed with variable-width data types",
+				ErrInvalidFileFormat,
+			)
+		}
 
 		dimension := leadIn.byteOrder.Uint32(rawDataIndexBytes[4:8])
 		if dimension != 1 {
@@ -570,36 +683,59 @@ func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error)
 			)
 		}
 
-		obj.rawDataIndex.numValues = leadIn.byteOrder.Uint64(rawDataIndexBytes[8:16])
+		obj.index.numValues = leadIn.byteOrder.Uint64(rawDataIndexBytes[8:16])
 
-		if obj.isDaqmxIndex {
+		if obj.index.scalerType == daqmxScalerTypeNone {
+			// The total size is only present when the data size is variable,
+			// e.g. is a string. I can't see any other variable size data types,
+			// although I am not sure about FixedPointer and DAQmx data.
+			if obj.index.dataType == DataTypeString {
+				obj.index.totalSize, err = readUint64(t.f, leadIn.byteOrder)
+				if err != nil {
+					return nil, errors.Join(ErrReadFailed, err)
+				}
+			} else {
+				obj.index.totalSize = obj.index.numValues * uint64(obj.index.dataType.Size())
+			}
+		} else {
 			numScalers, err := readUint32(t.f, leadIn.byteOrder)
 			if err != nil {
 				return nil, errors.Join(ErrReadFailed, err)
 			}
 
-			obj.rawDataIndex.scalers = make([]daqmxScaler, numScalers)
+			obj.index.scalers = make([]daqmxScaler, numScalers)
+
+			scalersBytes := make([]byte, scalerSize*numScalers)
+			if _, err := t.f.Read(scalersBytes); err != nil {
+				return nil, errors.Join(ErrReadFailed, err)
+			}
 
 			for i := range numScalers {
-				scalerBytes := make([]byte, 16)
-				if _, err := t.f.Read(scalerBytes); err != nil {
-					return nil, errors.Join(ErrReadFailed, err)
-				}
+				scalerBytes := scalersBytes[i*scalerSize : (i+1)*scalerSize]
 
-				scaler := &obj.rawDataIndex.scalers[i]
+				scaler := &obj.index.scalers[i]
 				scaler.dataType = DataType(leadIn.byteOrder.Uint32(scalerBytes))
 				scaler.rawBufferIndex = leadIn.byteOrder.Uint32(scalerBytes[4:8])
 				scaler.rawByteOffsetWithinStride = leadIn.byteOrder.Uint32(scalerBytes[8:12])
 				scaler.sampleFormatBitmap = leadIn.byteOrder.Uint32(scalerBytes[12:16])
 				scaler.scaleID = leadIn.byteOrder.Uint32(scalerBytes[16:20])
 			}
-		} else {
-			// The total size is only present when the data size is variable, e.g. is a string. I can't see any other variable size data types, although I am not sure about FixedPointer and DAQmx data.
-			if obj.rawDataIndex.dataType == DataTypeString {
-				obj.rawDataIndex.totalSize, err = readUint64(t.f, leadIn.byteOrder)
-				if err != nil {
-					return nil, errors.Join(ErrReadFailed, err)
-				}
+
+			numWidths, err := readUint32(t.f, leadIn.byteOrder)
+			if err != nil {
+				return nil, errors.Join(ErrReadFailed, err)
+			}
+
+			obj.index.widths = make([]uint32, numWidths)
+
+			widthsBytes := make([]byte, 4*numWidths)
+			if _, err := t.f.Read(widthsBytes); err != nil {
+				return nil, errors.Join(ErrReadFailed, err)
+			}
+
+			for i := range numWidths {
+				widthBytes := widthsBytes[i*4:]
+				obj.index.widths[i] = leadIn.byteOrder.Uint32(widthBytes)
 			}
 		}
 	}
@@ -640,51 +776,59 @@ func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error)
 	return &obj, nil
 }
 
-func (c *Channel) Parent() Group {
-	return c.f.Groups[c.GroupName]
+func (ch *Channel) Group() Group {
+	return ch.f.Groups[ch.GroupName]
 }
 
-func (c *Channel) ReadDataRaw(yield func([]byte) error) error {
-	// We could keep track of which segments hold data for which channels to
-	// potentially speed this up, but I don't think it would make a big
-	// difference.
-	for _, segment := range c.f.segments {
-		segmentObject, exists := segment.metadata.objectMap[c.path]
-		if !exists || !segmentObject.hasRawData {
-			// A channel doesn't have to exist or have data in all segments.
-			continue
-		}
+func (ch *Channel) ReadDataAsInt8(batchSize int) iter.Seq2[int8, error] {
+	return StreamReader(ch, batchSize, DataTypeInt8, interpretInt8)
+}
 
-		channelIdx := 0
-		i := 0
+func (ch *Channel) ReadDataAsInt16(batchSize int) iter.Seq2[int16, error] {
+	return StreamReader(ch, batchSize, DataTypeInt16, interpretInt16)
+}
 
-		// TODO: This could be sped up by keeping not an ordered list of objects
-		// but a map from path to index, where we would have to pre-calculate
-		// the index.
-		for _, obj := range segment.metadata.objectList {
-			if obj.path == c.path {
-				channelIdx = i
-			}
+func (ch *Channel) ReadDataAsInt32(batchSize int) iter.Seq2[int32, error] {
+	return StreamReader(ch, batchSize, DataTypeInt32, interpretInt32)
+}
 
-			if obj.hasRawData {
-				i++
-			}
-		}
+func (ch *Channel) ReadDataAsInt64(batchSize int) iter.Seq2[int64, error] {
+	return StreamReader(ch, batchSize, DataTypeInt64, interpretInt64)
+}
 
-		if segment.leadIn.isInterleaved {
-			// TODO: Handle interleaved data
-		} else {
-			// TODO: Handle non-interleaved data
-		}
-	}
+func (ch *Channel) ReadDataAsUint8(batchSize int) iter.Seq2[uint8, error] {
+	return StreamReader(ch, batchSize, DataTypeUint8, interpretUint8)
+}
 
-	if c.rawDataIndex.totalSize > maxBufferSize {
-		return ErrBufferSizeExceeded
-	}
+func (ch *Channel) ReadDataAsUint16(batchSize int) iter.Seq2[uint16, error] {
+	return StreamReader(ch, batchSize, DataTypeUint16, interpretUint16)
+}
 
-	buf := make([]byte, c.rawDataIndex.totalSize)
-	if _, err := io.ReadFull(c.f, buf); err != nil {
-		return fmt.Errorf("failed to read raw data: %w", err)
-	}
+func (ch *Channel) ReadDataAsUint32(batchSize int) iter.Seq2[uint32, error] {
+	return StreamReader(ch, batchSize, DataTypeUint32, interpretUint32)
+}
 
-	return yield(buf)
+func (ch *Channel) ReadDataAsUint64(batchSize int) iter.Seq2[uint64, error] {
+	return StreamReader(ch, batchSize, DataTypeUint64, interpretUint64)
+}
+
+func (ch *Channel) ReadDataAsFloat32(batchSize int) iter.Seq2[float32, error] {
+	return StreamReader(ch, batchSize, DataTypeFloat32, interpretFloat32)
+}
+
+func (ch *Channel) ReadDataAsFloat64(batchSize int) iter.Seq2[float64, error] {
+	return StreamReader(ch, batchSize, DataTypeFloat64, interpretFloat64)
+}
+
+func (ch *Channel) ReadDataAsString(batchSize int) iter.Seq2[string, error] {
+	// This won't work, as string is a variable-width data type where the
+	return StreamReader(ch, batchSize, DataTypeString, interpretString)
+}
+
+func (ch *Channel) ReadDataAsComplex64(batchSize int) iter.Seq2[complex64, error] {
+	return StreamReader(ch, batchSize, DataTypeComplex64, interpretComplex64)
+}
+
+func (ch *Channel) ReadDataAsComplex128(batchSize int) iter.Seq2[complex128, error] {
+	return StreamReader(ch, batchSize, DataTypeComplex128, interpretComplex128)
+}

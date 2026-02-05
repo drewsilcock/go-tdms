@@ -12,13 +12,21 @@ import (
 // This code would be much simpler if we used `binary.Read()`, but that function
 // is very slow because it uses reflection.
 
+// interpretBytes does not do anything to handle the byte order and just returns
+// the same array that you put in, copied into a new array.
+func interpretBytes(bytes []byte, order binary.ByteOrder) []byte {
+	ret := make([]byte, len(bytes))
+	copy(ret, bytes)
+	return ret
+}
+
 func readInt8(reader io.Reader, order binary.ByteOrder) (int8, error) {
 	valueBytes := make([]byte, 1)
 	if _, err := reader.Read(valueBytes); err != nil {
 		return 0, errors.Join(ErrReadFailed, err)
 	}
 
-	return int8(valueBytes[0]), nil
+	return interpretInt8(valueBytes, order), nil
 }
 
 func readInt16(reader io.Reader, order binary.ByteOrder) (int16, error) {
@@ -27,7 +35,7 @@ func readInt16(reader io.Reader, order binary.ByteOrder) (int16, error) {
 		return 0, errors.Join(ErrReadFailed, err)
 	}
 
-	return int16(order.Uint16(valueBytes)), nil
+	return interpretInt16(valueBytes, order), nil
 }
 
 func readInt32(reader io.Reader, order binary.ByteOrder) (int32, error) {
@@ -36,7 +44,7 @@ func readInt32(reader io.Reader, order binary.ByteOrder) (int32, error) {
 		return 0, errors.Join(ErrReadFailed, err)
 	}
 
-	return int32(order.Uint32(valueBytes)), nil
+	return interpretInt32(valueBytes, order), nil
 }
 
 func readInt64(reader io.Reader, order binary.ByteOrder) (int64, error) {
@@ -45,7 +53,7 @@ func readInt64(reader io.Reader, order binary.ByteOrder) (int64, error) {
 		return 0, errors.Join(ErrReadFailed, err)
 	}
 
-	return int64(order.Uint64(valueBytes)), nil
+	return interpretInt64(valueBytes, order), nil
 }
 
 func readUint8(reader io.Reader, order binary.ByteOrder) (uint8, error) {
@@ -54,7 +62,7 @@ func readUint8(reader io.Reader, order binary.ByteOrder) (uint8, error) {
 		return 0, errors.Join(ErrReadFailed, err)
 	}
 
-	return valueBytes[0], nil
+	return interpretUint8(valueBytes, order), nil
 }
 
 func readUint16(reader io.Reader, order binary.ByteOrder) (uint16, error) {
@@ -63,7 +71,7 @@ func readUint16(reader io.Reader, order binary.ByteOrder) (uint16, error) {
 		return 0, errors.Join(ErrReadFailed, err)
 	}
 
-	return order.Uint16(valueBytes), nil
+	return interpretUint16(valueBytes, order), nil
 }
 
 func readUint32(reader io.Reader, order binary.ByteOrder) (uint32, error) {
@@ -72,7 +80,7 @@ func readUint32(reader io.Reader, order binary.ByteOrder) (uint32, error) {
 		return 0, errors.Join(ErrReadFailed, err)
 	}
 
-	return order.Uint32(valueBytes), nil
+	return interpretUint32(valueBytes, order), nil
 }
 
 func readUint64(reader io.Reader, order binary.ByteOrder) (uint64, error) {
@@ -81,7 +89,7 @@ func readUint64(reader io.Reader, order binary.ByteOrder) (uint64, error) {
 		return 0, errors.Join(ErrReadFailed, err)
 	}
 
-	return order.Uint64(valueBytes), nil
+	return interpretUint64(valueBytes, order), nil
 }
 
 func readFloat32(reader io.Reader, order binary.ByteOrder) (float32, error) {
@@ -90,7 +98,7 @@ func readFloat32(reader io.Reader, order binary.ByteOrder) (float32, error) {
 		return 0, errors.Join(ErrReadFailed, err)
 	}
 
-	return math.Float32frombits(order.Uint32(valueBytes)), nil
+	return interpretFloat32(valueBytes, order), nil
 }
 
 func readFloat64(reader io.Reader, order binary.ByteOrder) (float64, error) {
@@ -99,7 +107,7 @@ func readFloat64(reader io.Reader, order binary.ByteOrder) (float64, error) {
 		return 0, errors.Join(ErrReadFailed, err)
 	}
 
-	return math.Float64frombits(order.Uint64(valueBytes)), nil
+	return interpretFloat64(valueBytes, order), nil
 }
 
 func readFloat128(reader io.Reader, order binary.ByteOrder) (Float128, error) {
@@ -108,15 +116,7 @@ func readFloat128(reader io.Reader, order binary.ByteOrder) (Float128, error) {
 		return Float128{}, errors.Join(ErrReadFailed, err)
 	}
 
-	// There no `order.Uint128()` to do this for us, so just reverse the slice.
-	// Probably not as fast as the bit shifting method from binary.LittleEndian,
-	// but hey. We store the value as little endian so it's standardised and we
-	// don't need to know the byte order when we convert it to another type.
-	if order == binary.BigEndian {
-		slices.Reverse(valueBytes)
-	}
-
-	return Float128(valueBytes), nil
+	return interpretFloat128(valueBytes, order), nil
 }
 
 func readString(reader io.Reader, order binary.ByteOrder) (string, error) {
@@ -130,7 +130,7 @@ func readString(reader io.Reader, order binary.ByteOrder) (string, error) {
 		return "", errors.Join(ErrReadFailed, err)
 	}
 
-	return string(strBytes), nil
+	return interpretString(strBytes, order), nil
 }
 
 func readBool(reader io.Reader, order binary.ByteOrder) (bool, error) {
@@ -139,7 +139,7 @@ func readBool(reader io.Reader, order binary.ByteOrder) (bool, error) {
 		return false, errors.Join(ErrReadFailed, err)
 	}
 
-	return valueBytes[0] != 0, nil
+	return interpretBool(valueBytes), nil
 }
 
 func readTime(reader io.Reader, order binary.ByteOrder) (Time, error) {
@@ -148,10 +148,7 @@ func readTime(reader io.Reader, order binary.ByteOrder) (Time, error) {
 		return Time{}, errors.Join(ErrReadFailed, err)
 	}
 
-	return Time{
-		Timestamp: int64(order.Uint64(valueBytes)),
-		Remainder: order.Uint64(valueBytes[8:]),
-	}, nil
+	return interpretTime(valueBytes, order), nil
 }
 
 func readComplex64(reader io.Reader, order binary.ByteOrder) (complex64, error) {
@@ -160,10 +157,7 @@ func readComplex64(reader io.Reader, order binary.ByteOrder) (complex64, error) 
 		return 0 + 0i, errors.Join(ErrReadFailed, err)
 	}
 
-	realValue := math.Float32frombits(order.Uint32(valueBytes))
-	imagValue := math.Float32frombits(order.Uint32(valueBytes[4:]))
-
-	return complex(realValue, imagValue), nil
+	return interpretComplex64(valueBytes, order), nil
 }
 
 func readComplex128(reader io.Reader, order binary.ByteOrder) (complex128, error) {
@@ -172,10 +166,97 @@ func readComplex128(reader io.Reader, order binary.ByteOrder) (complex128, error
 		return 0 + 0i, errors.Join(ErrReadFailed, err)
 	}
 
-	realValue := math.Float64frombits(order.Uint64(valueBytes))
-	imagValue := math.Float64frombits(order.Uint64(valueBytes[8:]))
+	return interpretComplex128(valueBytes, order), nil
+}
 
-	return complex(realValue, imagValue), nil
+// Interpret functions - convert byte slices to their respective types
+
+func interpretVoid(bytes []byte, order binary.ByteOrder) struct{} {
+	return struct{}{}
+}
+
+func interpretInt8(bytes []byte, order binary.ByteOrder) int8 {
+	return int8(bytes[0])
+}
+
+func interpretInt16(bytes []byte, order binary.ByteOrder) int16 {
+	return int16(order.Uint16(bytes))
+}
+
+func interpretInt32(bytes []byte, order binary.ByteOrder) int32 {
+	return int32(order.Uint32(bytes))
+}
+
+func interpretInt64(bytes []byte, order binary.ByteOrder) int64 {
+	return int64(order.Uint64(bytes))
+}
+
+func interpretUint8(bytes []byte, order binary.ByteOrder) uint8 {
+	return bytes[0]
+}
+
+func interpretUint16(bytes []byte, order binary.ByteOrder) uint16 {
+	return order.Uint16(bytes)
+}
+
+func interpretUint32(bytes []byte, order binary.ByteOrder) uint32 {
+	return order.Uint32(bytes)
+}
+
+func interpretUint64(bytes []byte, order binary.ByteOrder) uint64 {
+	return order.Uint64(bytes)
+}
+
+func interpretFloat32(bytes []byte, order binary.ByteOrder) float32 {
+	return math.Float32frombits(order.Uint32(bytes))
+}
+
+func interpretFloat64(bytes []byte, order binary.ByteOrder) float64 {
+	return math.Float64frombits(order.Uint64(bytes))
+}
+
+func interpretFloat128(bytes []byte, order binary.ByteOrder) Float128 {
+	// There no `order.Uint128()` to do this for us, so just reverse the slice.
+	// Probably not as fast as the bit shifting method from binary.LittleEndian,
+	// but hey. We store the value as little endian so it's standardised and we
+	// don't need to know the byte order when we convert it to another type.
+	if order == binary.BigEndian {
+		slices.Reverse(bytes)
+	}
+
+	return Float128(bytes)
+}
+
+func interpretString(bytes []byte, order binary.ByteOrder) string {
+	// This relies on you having already ascertained the length, which is stored
+	// in the file either at the start of the data point or the start of the
+	// chunk.
+	return string(bytes)
+}
+
+func interpretBool(bytes []byte) bool {
+	return bytes[0] != 0
+}
+
+func interpretTime(bytes []byte, order binary.ByteOrder) Time {
+	return Time{
+		Timestamp: int64(order.Uint64(bytes)),
+		Remainder: order.Uint64(bytes[8:]),
+	}
+}
+
+func interpretComplex64(bytes []byte, order binary.ByteOrder) complex64 {
+	realValue := math.Float32frombits(order.Uint32(bytes))
+	imagValue := math.Float32frombits(order.Uint32(bytes[4:]))
+
+	return complex(realValue, imagValue)
+}
+
+func interpretComplex128(bytes []byte, order binary.ByteOrder) complex128 {
+	realValue := math.Float64frombits(order.Uint64(bytes))
+	imagValue := math.Float64frombits(order.Uint64(bytes[8:]))
+
+	return complex(realValue, imagValue)
 }
 
 func parsePath(path string) (string, string, error) {

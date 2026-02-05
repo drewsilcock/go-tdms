@@ -18,3 +18,6 @@ package tdms
 //   - add
 //   - subtract
 //   - advanced API (taken as no-op)
+//
+// See: https://www.ni.com/docs/en-US/bundle/labwindows-cvi/page/cvi/libref/cvitdmslibraryfunctiontree.htm
+// (scroll down to "Advanced Data Scaling")
