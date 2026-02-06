@@ -2,9 +2,7 @@
 
 [![CI](https://github.com/drewsilcock/go-tdms/actions/workflows/ci.yaml/badge.svg)](https://github.com/drewsilcock/go-tdms/actions/workflows/ci.yaml)
 
-This is a pure Go no-dependency* file parser for the Technical Data Management Streaming (TDMS) format used by National Instruments (NI) software such as LabVIEW.
-
-*There is a single dependency that's used only for tests, so this shouldn't be brought through into your code when you install it.
+This is a pure Go no-dependency file parser for the Technical Data Management Streaming (TDMS) format used by National Instruments (NI) software such as LabVIEW.
 
 ## Status
 
@@ -31,4 +29,5 @@ I used a few bits of code and documentation to write this, such as:
 - https://www.ni.com/en/support/documentation/supplemental/06/introduction-to-labview-tdm-streaming-vis.html
 - https://www.ni.com/docs/en-US/bundle/labwindows-cvi/page/cvi/libref/cvitdmslibrary.htm
 - https://github.com/ni/nidaqmx-python
+- https://github.com/ni/tdms-parser/
 - https://github.com/adamreeve/npTDMS/
