@@ -135,13 +135,13 @@ func readBool(reader io.Reader, order binary.ByteOrder) (bool, error) {
 	return interpretBool(valueBytes, order), nil
 }
 
-func readTime(reader io.Reader, order binary.ByteOrder) (time.Time, error) {
+func readTime(reader io.Reader, order binary.ByteOrder) (Timestamp, error) {
 	valueBytes := make([]byte, 16)
 	if _, err := reader.Read(valueBytes); err != nil {
-		return time.Time{}, errors.Join(ErrReadFailed, err)
+		return Timestamp{}, errors.Join(ErrReadFailed, err)
 	}
 
-	return interpretTime(valueBytes, order), nil
+	return interpretTimestamp(valueBytes, order), nil
 }
 
 func readComplex64(reader io.Reader, order binary.ByteOrder) (complex64, error) {
@@ -227,12 +227,19 @@ func interpretBool(bytes []byte, order binary.ByteOrder) bool {
 	return bytes[0] != 0
 }
 
-func interpretTime(bytes []byte, order binary.ByteOrder) time.Time {
-	tdsTime := Time{
+func interpretTimestamp(bytes []byte, order binary.ByteOrder) Timestamp {
+	return Timestamp{
 		Timestamp: int64(order.Uint64(bytes)),
 		Remainder: order.Uint64(bytes[8:]),
 	}
-	return tdsTime.Time()
+}
+
+func interpretTime(bytes []byte, order binary.ByteOrder) time.Time {
+	t := Timestamp{
+		Timestamp: int64(order.Uint64(bytes)),
+		Remainder: order.Uint64(bytes[8:]),
+	}
+	return t.AsTime()
 }
 
 func interpretComplex64(bytes []byte, order binary.ByteOrder) complex64 {

@@ -28,7 +28,7 @@ const (
 	DataTypeFloat128WithUnit DataType = 0x1B
 	DataTypeString           DataType = 0x20
 	DataTypeBool             DataType = 0x21
-	DataTypeTime             DataType = 0x44
+	DataTypeTimestamp        DataType = 0x44
 	DataTypeFixedPoint       DataType = 0x4F
 	DataTypeComplex64        DataType = 0x08000c
 	DataTypeComplex128       DataType = 0x10000d
@@ -47,7 +47,7 @@ func (dt DataType) Size() int {
 		return 4
 	case DataTypeInt64, DataTypeUint64, DataTypeFloat64, DataTypeComplex64:
 		return 8
-	case DataTypeFloat128, DataTypeComplex128, DataTypeTime:
+	case DataTypeFloat128, DataTypeComplex128, DataTypeTimestamp:
 		return 16
 	default:
 		return 0
@@ -90,7 +90,7 @@ func (dt DataType) Name() string {
 		return "String"
 	case DataTypeBool:
 		return "Bool"
-	case DataTypeTime:
+	case DataTypeTimestamp:
 		return "Time"
 	case DataTypeComplex64:
 		return "ComplexFloat64"
@@ -137,7 +137,7 @@ func readValue(typeCode DataType, reader io.Reader, byteOrder binary.ByteOrder) 
 		return readString(reader, byteOrder)
 	case DataTypeBool:
 		return readBool(reader, byteOrder)
-	case DataTypeTime:
+	case DataTypeTimestamp:
 		return readTime(reader, byteOrder)
 	case DataTypeComplex64:
 		return readComplex64(reader, byteOrder)
@@ -271,23 +271,33 @@ func mantissaToBigInt(mantissaBits []byte) *big.Int {
 	return result
 }
 
-type Time struct {
+// Timestamp is the TDMS representation of timestamps.
+//
+// TDMS timestamps have significantly more precision than a standard time.Timestamp
+// value. Be aware that when converting to time.Timestamp using `AsTime()`, precision
+// is lost. For most purposes, this is acceptable as the level of precision in
+// the TDMS format is insane (the lowest representable value is roughly half an
+// attosecond, compared to time.Timestamp which can store no less than one
+// nanosecond).
+//
+// TDMS stores timestamps as a combination of i64 n# seconds since TDMS epoch
+// which is 1st January 1904 at midnight and u64 number representing number
+// fractional remainder, where the actual fractional n# seconds is retrieved by
+// dividing by 2^-64. There is no timezone support.
+//
+// For details, see:
+// https://www.ni.com/en/support/documentation/supplemental/08/labview-timestamp-overview.html
+type Timestamp struct {
 	Timestamp int64
 	Remainder uint64
 }
 
-// Time removes much of the precision in the TDS timestamp itself by converting
+// AsTime removes much of the precision in the TDMS timestamp itself by converting
 // from u64 remainder value (which is n# of 2^-64ths of a second =~ 0.05
-// attoseconds) to nanoseconds. Thus, the TDS format retains approximately 1.8 ×
-// 10^10 times more information than time.Time. This is not relevant for most
+// attoseconds) to nanoseconds. Thus, the TDMS format retains approximately 1.8 ×
+// 10^10 times more information than time.AsTime. This is not relevant for most
 // purposes, but important to keep in mind.
-//
-// TDMS stores timestamps as a combination of i64 n# seconds since TDMS epoch
-// which is 1st January 1904 at midnight and u64 number representing number
-// fractional remainder, wherethe actual fractional n# seconds is retrieved by
-// dividing by 2^-64. There is no timezone support.
-// https://www.ni.com/en/support/documentation/supplemental/08/labview-timestamp-overview.html
-func (t *Time) Time() time.Time {
+func (t *Timestamp) AsTime() time.Time {
 	// I'm not sure whether this big.Int stuff is necessary as opposed to doing
 	// `float64(posFractions) * math.Pow(2, -64) * 1e9`. I need to experiment
 	// with some large values to determine.

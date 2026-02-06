@@ -99,8 +99,12 @@ func (ch *Channel) ReadDataAsBool(options ...ReadOption) iter.Seq2[bool, error] 
 	return StreamReader(ch, options, DataTypeBool, interpretBool)
 }
 
+func (ch *Channel) ReadDataAsTimestamp(options ...ReadOption) iter.Seq2[Timestamp, error] {
+	return StreamReader(ch, options, DataTypeTimestamp, interpretTimestamp)
+}
+
 func (ch *Channel) ReadDataAsTime(options ...ReadOption) iter.Seq2[time.Time, error] {
-	return StreamReader(ch, options, DataTypeTime, interpretTime)
+	return StreamReader(ch, options, DataTypeTimestamp, interpretTime)
 }
 
 func (ch *Channel) ReadDataAsComplex64(options ...ReadOption) iter.Seq2[complex64, error] {
@@ -165,8 +169,12 @@ func (ch *Channel) ReadDataAsBoolBatch(options ...ReadOption) iter.Seq2[[]bool, 
 	return BatchStreamReader(ch, options, DataTypeBool, interpretBool)
 }
 
+func (ch *Channel) ReadDataAsTimestampBatch(options ...ReadOption) iter.Seq2[[]Timestamp, error] {
+	return BatchStreamReader(ch, options, DataTypeTimestamp, interpretTimestamp)
+}
+
 func (ch *Channel) ReadDataAsTimeBatch(options ...ReadOption) iter.Seq2[[]time.Time, error] {
-	return BatchStreamReader(ch, options, DataTypeTime, interpretTime)
+	return BatchStreamReader(ch, options, DataTypeTimestamp, interpretTime)
 }
 
 func (ch *Channel) ReadDataAsComplex64Batch(options ...ReadOption) iter.Seq2[[]complex64, error] {
@@ -231,8 +239,12 @@ func (ch *Channel) ReadDataBoolAll(options ...ReadOption) ([]bool, error) {
 	return readAllData(ch, options, DataTypeBool, interpretBool)
 }
 
+func (ch *Channel) ReadDataTimestampAll(options ...ReadOption) ([]Timestamp, error) {
+	return readAllData(ch, options, DataTypeTimestamp, interpretTimestamp)
+}
+
 func (ch *Channel) ReadDataTimeAll(options ...ReadOption) ([]time.Time, error) {
-	return readAllData(ch, options, DataTypeTime, interpretTime)
+	return readAllData(ch, options, DataTypeTimestamp, interpretTime)
 }
 
 func (ch *Channel) ReadDataComplex64All(options ...ReadOption) ([]complex64, error) {

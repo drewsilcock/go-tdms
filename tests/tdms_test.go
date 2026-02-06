@@ -1101,7 +1101,7 @@ func mapDataType(s string) tdms.DataType {
 	case "boolean":
 		return tdms.DataTypeBool
 	case "timestamp":
-		return tdms.DataTypeTime
+		return tdms.DataTypeTimestamp
 	case "complex64":
 		return tdms.DataTypeComplex64
 	case "complex128":
