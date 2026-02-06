@@ -4,20 +4,97 @@
 
 This is a pure Go no-dependency file parser for the Technical Data Management Streaming (TDMS) format used by National Instruments (NI) software such as LabVIEW.
 
+## Usage
+
+Install with:
+
+```shell
+go get -u github.com/drewsilcock/go-tdms
+```
+
+Open and explore TDMS files like so:
+
+```go
+file, err := tdms.Open("data.tdms")
+if err != nil {
+	log.Fatal(err)
+}
+defer file.Close()
+
+for _, group := range file.Groups {
+	for _, channel := range group.Channels {
+		// Iterate through individual values (uses batching internally).
+		for value, err := range channel.ReadDataAsFloat64() {
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println(value)
+		}
+
+		// Iterate through batches of values.
+		for batch, err := range channel.ReadDataAsFloat64Batch() {
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println(batch)
+		}
+
+		// Batch size is configurable (both for individual value streamer and
+		// batch streamer)
+		for batch, err := range channel.ReadDataAsFloat64Batch(tdms.BatchSize(1024)) {
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println(batch)
+		}
+
+		// Read all values into a single slice
+		values, err := channel.ReadDataAsFloat64All() {
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(values)
+	}
+}
+
+// Access property value string using the `As[Type]()` methods.
+authorProp := file.Properties["Author"]
+author, err := authorProp.AsString()
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println("Why, this TDMS file was written by none other than ", author)
+```
+
 ## Status
 
 As of February 2026, this is being actively maintained but has not been battled-tested.
 
 | Feature                                     | Status |
 |---------------------------------------------|--------|
-| Reading TDMS file metadata                  | ☑️     |
+| Reading TDMS file full data files           | ☑️     |
+| Reading TDMS file index files               | ☑️     |
 | Reading properties from file objects        | ☑️     |
 | Reading data from channels                  | ☑️     |
 | Streaming data from channels                | ☑️     |
 | Extended precision floating point data type | ☑️     |
 | Timestamp floating point data type          | ☑️     |
+| Complex floating point data types           | ☑️     |
+| Multi-chunk segments                        | ☑️     |
+| Data interleaving                           | ☑️     |
 | Data scaling                                | □      |
-| DAQmx data and data scaling                 | □      |
+| DAQmx data and scalers                      | □      |
+| Fixed point numerics                        | □      |
+
+### Future work
+
+#### Data scaling and DAQmx
+
+I need to read up more about how the data scaling works and what exactly DAQmx is. The official documentation on this is either very confusing or non-existent, so the best source is information is usually the npTDMS source code.
+
+#### Fixed point numerics
+
+The official documentation does not provide any detail on what format the fixed point numerics are stored on disk with, and I cannot find any examples of TDMS files with fixed point numerics on the internet, so until I can find more information this is going to remain unimplemented.
 
 ## References
 
