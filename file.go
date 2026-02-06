@@ -38,14 +38,6 @@ type Group struct {
 	f *File
 }
 
-// Property represents a key-value property attached to a file, group, or
-// channel.
-type Property struct {
-	Name     string
-	TypeCode DataType
-	Value    any
-}
-
 // New creates a [File] from the given [io.ReadSeeker]. Set isIndex to true when
 // reading a .tdms_index file. The size parameter must be the total byte length
 // of the data accessible through reader.

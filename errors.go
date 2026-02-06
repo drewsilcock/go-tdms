@@ -8,4 +8,5 @@ var (
 	ErrInvalidFileFormat  = errors.New("invalid file format")
 	ErrInvalidPath        = errors.New("invalid object path")
 	ErrUnsupportedType    = errors.New("unsupported data type")
+	ErrIncorrectType      = errors.New("incorrect data type")
 )
