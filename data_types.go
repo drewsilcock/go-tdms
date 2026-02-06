@@ -173,15 +173,26 @@ func readValue(typeCode DataType, reader io.Reader, byteOrder binary.ByteOrder) 
 // the full precision or not.
 type Float128 [16]byte
 
-// Float64 converts the 128-bit extended precision float to a primitive float64.
+func (f Float128) String() string {
+	return f.AsBigFloat().String()
+}
+
+// AsFloat64 converts the 128-bit extended precision float to a primitive float64.
 // This loses a significant amount of precision. To avoid losing any precision
 // at the cost of usability, see `BigFloat()`.
-func (f Float128) Float64() float64 {
-	result, _ := f.BigFloat().Float64()
+func (f Float128) AsFloat64() float64 {
+	result, _ := f.AsBigFloat().Float64()
 	return result
 }
 
-func (f Float128) BigFloat() *big.Float {
+// AsBigFloat converts the 128-bit extended precision float to a big.Float.
+// This is the most precise representation of the value, meaning no precision is
+// lost in the conversion to big.Float.
+//
+// If you do not require the full precision of the original 128-bit floating
+// pointer number, you can use the `AsFloat64()` method to convert the float to
+// a 64-bit number, losing precision at the benefit of ease of use.
+func (f Float128) AsBigFloat() *big.Float {
 	// Extract sign bit (bit 127)
 	sign := (f[0] >> 7) & 1
 
@@ -305,4 +316,8 @@ func (t *Timestamp) AsTime() time.Time {
 	ns.Mul(ns, big.NewInt(1e9))
 	ns.Rsh(ns, 64)
 	return time.Unix(t.Timestamp, ns.Int64())
+}
+
+func (t *Timestamp) String() string {
+	return t.AsTime().String()
 }
