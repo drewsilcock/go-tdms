@@ -64,15 +64,24 @@ func BatchStreamReader[T any](
 	interpret interpreter[T],
 ) iter.Seq2[[]T, error] {
 	return func(yield func([]T, error) bool) {
-		opts := readOptions{batchSize: 10_048}
+		opts := readOptions{}
 		for _, opt := range options {
 			opt(&opts)
 		}
 
+		if opts.batchSize == 0 {
+			opts.batchSize = 2056
+			if dataType == DataTypeString {
+				// Strings are generally much larger than individual ints or
+				// floats, so we use much smaller default batch size.
+				opts.batchSize = 256
+			}
+		}
+
+		// If we have fewer data points in total than a single batch size, we
+		// can allocate only what we need.
 		batchSize := min(opts.batchSize, int(ch.totalNumValues))
 		dataSize := dataType.Size()
-
-		// TODO: If total data size < batch size, allocate less.
 
 		buf := make([]byte, batchSize*dataSize)
 		bufLen := uint64(len(buf))
