@@ -54,6 +54,12 @@ func (dt DataType) Size() int {
 	}
 }
 
+// String implements the [fmt.Stringer] interface, returning the human-readable
+// name of the data type.
+func (dt DataType) String() string {
+	return dt.Name()
+}
+
 func (dt DataType) Name() string {
 	switch dt {
 	case DataTypeVoid:
