@@ -8,33 +8,79 @@ import (
 	"time"
 )
 
+// DataType represents the type of data stored in a TDMS channel or property.
 type DataType uint32
 
 const (
+	// DataTypeVoid represents an empty or void data type.
 	DataTypeVoid DataType = iota
+
+	// DataTypeInt8 represents an 8-bit signed integer.
 	DataTypeInt8
+
+	// DataTypeInt16 represents a 16-bit signed integer.
 	DataTypeInt16
+
+	// DataTypeInt32 represents a 32-bit signed integer.
 	DataTypeInt32
+
+	// DataTypeInt64 represents a 64-bit signed integer.
 	DataTypeInt64
+
+	// DataTypeUint8 represents an 8-bit unsigned integer.
 	DataTypeUint8
+
+	// DataTypeUint16 represents a 16-bit unsigned integer.
 	DataTypeUint16
+
+	// DataTypeUint32 represents a 32-bit unsigned integer.
 	DataTypeUint32
+
+	// DataTypeUint64 represents a 64-bit unsigned integer.
 	DataTypeUint64
+
+	// DataTypeFloat32 represents a 32-bit floating point number.
 	DataTypeFloat32
+
+	// DataTypeFloat64 represents a 64-bit floating point number.
 	DataTypeFloat64
+
+	// DataTypeFloat128 represents a 128-bit extended precision floating point number.
 	DataTypeFloat128
-	DataTypeFloat32WithUnit  DataType = 0x19
-	DataTypeFloat64WithUnit  DataType = 0x1A
+
+	// DataTypeFloat32WithUnit represents a 32-bit floating point number with an associated unit string property.
+	DataTypeFloat32WithUnit DataType = 0x19
+
+	// DataTypeFloat64WithUnit represents a 64-bit floating point number with an associated unit string property.
+	DataTypeFloat64WithUnit DataType = 0x1A
+
+	// DataTypeFloat128WithUnit represents a 128-bit floating point number with an associated unit string property.
 	DataTypeFloat128WithUnit DataType = 0x1B
-	DataTypeString           DataType = 0x20
-	DataTypeBool             DataType = 0x21
-	DataTypeTimestamp        DataType = 0x44
-	DataTypeFixedPoint       DataType = 0x4F
-	DataTypeComplex64        DataType = 0x08000c
-	DataTypeComplex128       DataType = 0x10000d
-	DataTypeDAQmxRawData     DataType = 0xFFFFFFFF
+
+	// DataTypeString represents a variable-length UTF-8 string.
+	DataTypeString DataType = 0x20
+
+	// DataTypeBool represents a boolean value.
+	DataTypeBool DataType = 0x21
+
+	// DataTypeTimestamp represents a timestamp with extended precision.
+	DataTypeTimestamp DataType = 0x44
+
+	// DataTypeFixedPoint represents a fixed-point number (not currently supported).
+	DataTypeFixedPoint DataType = 0x4F
+
+	// DataTypeComplex64 represents a complex number with 32-bit real and imaginary parts.
+	DataTypeComplex64 DataType = 0x08000c
+
+	// DataTypeComplex128 represents a complex number with 64-bit real and imaginary parts.
+	DataTypeComplex128 DataType = 0x10000d
+
+	// DataTypeDAQmxRawData represents raw DAQmx data.
+	DataTypeDAQmxRawData DataType = 0xFFFFFFFF
 )
 
+// Size returns the size in bytes of a single value of this data type.
+// Returns 0 for variable-length types like strings.
 func (dt DataType) Size() int {
 	switch dt {
 	case DataTypeVoid, DataTypeString:
@@ -60,6 +106,7 @@ func (dt DataType) String() string {
 	return dt.Name()
 }
 
+// Name returns the human-readable name of the data type.
 func (dt DataType) Name() string {
 	switch dt {
 	case DataTypeVoid:
@@ -168,18 +215,21 @@ func readValue(typeCode DataType, reader io.Reader, byteOrder binary.ByteOrder) 
 	// indicator that the data is a vector of other data types?
 }
 
+// Float128 represents a 128-bit extended precision floating point number.
 // When represented in memory, this type is always little endian. To get a
-// usable value, see `Float64()` and `BigFloat()`, depending on whether you need
-// the full precision or not.
+// usable value, see [Float128.AsFloat64] and [Float128.AsBigFloat], depending
+// on whether you need the full precision or not.
 type Float128 [16]byte
 
+// String implements the [fmt.Stringer] interface, returning the string representation
+// of the [Float128] value via [big.Float].
 func (f Float128) String() string {
 	return f.AsBigFloat().String()
 }
 
 // AsFloat64 converts the 128-bit extended precision float to a primitive float64.
 // This loses a significant amount of precision. To avoid losing any precision
-// at the cost of usability, see `BigFloat()`.
+// at the cost of usability, see [Float128.AsBigFloat].
 func (f Float128) AsFloat64() float64 {
 	result, _ := f.AsBigFloat().Float64()
 	return result
@@ -190,8 +240,8 @@ func (f Float128) AsFloat64() float64 {
 // lost in the conversion to big.Float.
 //
 // If you do not require the full precision of the original 128-bit floating
-// pointer number, you can use the `AsFloat64()` method to convert the float to
-// a 64-bit number, losing precision at the benefit of ease of use.
+// point number, you can use the [Float128.AsFloat64] method to convert the
+// float to a 64-bit number, losing precision at the benefit of ease of use.
 func (f Float128) AsBigFloat() *big.Float {
 	// Extract sign bit (bit 127)
 	sign := (f[0] >> 7) & 1
@@ -284,30 +334,36 @@ func mantissaToBigInt(mantissaBits []byte) *big.Int {
 
 // Timestamp is the TDMS representation of timestamps.
 //
-// TDMS timestamps have significantly more precision than a standard time.Timestamp
-// value. Be aware that when converting to time.Timestamp using `AsTime()`, precision
-// is lost. For most purposes, this is acceptable as the level of precision in
-// the TDMS format is insane (the lowest representable value is roughly half an
-// attosecond, compared to time.Timestamp which can store no less than one
-// nanosecond).
+// TDMS timestamps have significantly more precision than a standard time.Time
+// value. Be aware that when converting to [time.Time] using [Timestamp.AsTime],
+// precision is lost. For most purposes, this is acceptable as the level of
+// precision in the TDMS format is extreme (the lowest representable value is
+// roughly half an attosecond, compared to time.Time which can store no less
+// than one nanosecond).
 //
-// TDMS stores timestamps as a combination of i64 n# seconds since TDMS epoch
-// which is 1st January 1904 at midnight and u64 number representing number
-// fractional remainder, where the actual fractional n# seconds is retrieved by
-// dividing by 2^-64. There is no timezone support.
+// TDMS stores timestamps as a combination of int64 number of seconds since TDMS
+// epoch (which is 1st January 1904 at midnight) and uint64 number representing
+// the fractional remainder, where the actual fractional number of seconds is
+// retrieved by dividing by 2^64. There is no timezone support.
 //
 // For details, see:
 // https://www.ni.com/en/support/documentation/supplemental/08/labview-timestamp-overview.html
 type Timestamp struct {
+	// Timestamp is the number of seconds since the TDMS epoch (January 1, 1904
+	// 00:00:00 UTC), excluding any leap seconds.
 	Timestamp int64
+
+	// Remainder is the fractional part of the timestamp, where the actual fraction
+	// is Remainder / 2^64.
 	Remainder uint64
 }
 
-// AsTime removes much of the precision in the TDMS timestamp itself by converting
-// from u64 remainder value (which is n# of 2^-64ths of a second =~ 0.05
-// attoseconds) to nanoseconds. Thus, the TDMS format retains approximately 1.8 ×
-// 10^10 times more information than time.AsTime. This is not relevant for most
-// purposes, but important to keep in mind.
+// AsTime converts the TDMS timestamp to a [time.Time] value. This removes much
+// of the precision in the TDMS timestamp by converting from uint64 remainder
+// value (which represents 2^-64ths of a second, approximately 0.05 attoseconds)
+// to nanoseconds. The TDMS format retains approximately 1.8 × 10^10 times more
+// information than [time.Time]. This precision loss is not relevant for most
+// purposes, but important to keep in mind for high-precision applications.
 func (t *Timestamp) AsTime() time.Time {
 	// I'm not sure whether this big.Int stuff is necessary as opposed to doing
 	// `float64(posFractions) * math.Pow(2, -64) * 1e9`. I need to experiment
@@ -318,6 +374,8 @@ func (t *Timestamp) AsTime() time.Time {
 	return time.Unix(t.Timestamp, ns.Int64())
 }
 
+// String implements the [fmt.Stringer] interface, returning the string
+// representation of the timestamp as a time.Time value.
 func (t *Timestamp) String() string {
 	return t.AsTime().String()
 }

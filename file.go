@@ -11,8 +11,14 @@ import (
 // File represents a parsed TDMS file. Use [Open] to open a file by path, or
 // [New] to create a File from an [io.ReadSeeker].
 type File struct {
-	Groups       map[string]Group
-	Properties   map[string]Property
+	// Groups contains all groups in the TDMS file, indexed by group name.
+	Groups map[string]Group
+
+	// Properties contains all properties associated with the root file object.
+	Properties map[string]Property
+
+	// IsIncomplete indicates whether the file was incompletely written, typically
+	// because LabVIEW crashed while writing the final segment.
 	IsIncomplete bool
 
 	f        io.ReadSeeker
@@ -31,8 +37,13 @@ type File struct {
 // Group represents a group within a TDMS file, containing channels and
 // properties.
 type Group struct {
-	Name       string
-	Channels   map[string]Channel
+	// Name is the name of this group.
+	Name string
+
+	// Channels contains all channels in this group, indexed by channel name.
+	Channels map[string]Channel
+
+	// Properties contains all properties associated with this group.
 	Properties map[string]Property
 
 	f *File

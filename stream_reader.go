@@ -20,9 +20,12 @@ import (
 
 type interpreter[T any] func([]byte, binary.ByteOrder) T
 
-// StreamReader still internally uses batching, hence the batch size param,
-// however it returns the results as individual values, which may be more useful
-// in many scenarios.
+// StreamReader returns an iterator yielding individual values from the channel.
+//
+// It internally uses batching for performance, but unwraps the batches
+// to yield one value at a time. Use the [BatchSize] option to control the
+// internal buffer size. This is the most convenient way to iterate over channel
+// data when you need to process values individually.
 func StreamReader[T any](
 	ch *Channel,
 	options []ReadOption,
@@ -45,18 +48,14 @@ func StreamReader[T any](
 	}
 }
 
-// Be aware that this re-uses the same batch during the lifetime of the
-// iterator. If you want to collect all the data from the BatchStreamReader, you
-// need to copy the data into your own buffer.
+// BatchStreamReader returns an iterator that yields batches of values from the
+// channel. Each batch is a slice of values read from the underlying file. Use
+// the [BatchSize] option to control how many values are read in each batch.
 //
-// We could also implement `ReadAll()` functions for this purpose, or we could
-// pass in the buffer externally to make it explicit that this is happening.
-//
-// The approach used here to convert bytes to T is likely to mean that the
-// interpret functions can't be inlined, but I shouldn't think this would make a
-// big difference. It would be interesting to benchmark that.
-//
-// TODO: This doesn't correctly handle reading channels of type string.
+// Important: The same underlying slice is reused for each batch to avoid
+// allocations. If you need to retain batch data beyond the current iteration,
+// you must copy it to your own buffer. For reading all data into a single
+// slice, use the ReadData*All methods on [Channel] instead.
 func BatchStreamReader[T any](
 	ch *Channel,
 	options []ReadOption,
