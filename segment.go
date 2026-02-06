@@ -183,10 +183,10 @@ func (t *File) readSegmentLeadIn() (*leadIn, error) {
 	magicBytes := leadInBytes[:4]
 	if t.isIndex {
 		if !bytes.Equal(magicBytes, tdmsIndexMagicBytes) {
-			return nil, errors.Join(ErrInvalidFileFormat, errors.New("invalid TDSM index magic bytes"))
+			return nil, errors.Join(ErrInvalidFileFormat, errors.New("invalid TDMS index magic bytes"))
 		}
 	} else if !bytes.Equal(magicBytes, tdmsMagicBytes) {
-		return nil, errors.Join(ErrInvalidFileFormat, errors.New("invalid TDSM magic bytes"))
+		return nil, errors.Join(ErrInvalidFileFormat, errors.New("invalid TDMS magic bytes"))
 	}
 
 	leadIn := leadIn{
