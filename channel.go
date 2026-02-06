@@ -1,6 +1,7 @@
 package tdms
 
 import (
+	"encoding/binary"
 	"iter"
 	"time"
 )
@@ -24,6 +25,26 @@ type Channel struct {
 	path           string
 	dataChunks     []dataChunk
 	totalNumValues uint64
+}
+
+// dataChunk is similar to objectIndex, but is a single object index can
+// correspond to multiple chunks whereas a single dataChunk instance corresponds
+// to a single raw data chunk in the TDMS file.
+//
+// Note that a dataChunk instance is specific to an individual object, meaning a
+// segment in a TDMS file with 2 channels and 3 chunks will have 6 dataChunk
+// instances corresponding to it.
+//
+// This is purely for ease of use
+// to make reading simpler and to keep all the necessary information self-contained.
+type dataChunk struct {
+	// offset is absolute from the start of the file
+	offset        int64
+	isInterleaved bool
+	order         binary.ByteOrder
+	size          uint64
+	numValues     uint64
+	stride        int64
 }
 
 // Group returns the [Group] that this channel belongs to.

@@ -1,5 +1,8 @@
 package tdms
 
+// This file contains the internal logic for parsing the lead in and metadata
+// from the TDMS files, which is where most of the tricky code is.
+
 import (
 	"bytes"
 	"encoding/binary"
@@ -62,6 +65,9 @@ var (
 	tdmsIndexMagicBytes = []byte{'T', 'D', 'S', 'h'}
 )
 
+// segment contains an individual section of the TDMS file, of which a TDMS file
+// consists of one or more. Each segment has it's own lead in, optionally with
+// metadata and raw data.
 type segment struct {
 	offset   int64
 	leadIn   *leadIn
@@ -135,26 +141,6 @@ type objectIndex struct {
 	// interleaved. It is equal to the size of a single datum for all objects
 	// other than the current object.
 	stride int64
-}
-
-// dataChunk is similar to objectIndex, but is a single object index can
-// correspond to multiple chunks whereas a single dataChunk instance corresponds
-// to a single raw data chunk in the TDMS file.
-//
-// Note that a dataChunk instance is specific to an individual object, meaning a
-// segment in a TDMS file with 2 channels and 3 chunks will have 6 dataChunk
-// instances corresponding to it.
-//
-// This is purely for ease of use
-// to make reading simpler and to keep all the necessary information self-contained.
-type dataChunk struct {
-	// offset is absolute from the start of the file
-	offset        int64
-	isInterleaved bool
-	order         binary.ByteOrder
-	size          uint64
-	numValues     uint64
-	stride        int64
 }
 
 type daqmxScaler struct {
