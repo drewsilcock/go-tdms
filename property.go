@@ -7,6 +7,10 @@ import (
 
 type Properties map[string]Property
 
+func NewProperties() Properties {
+	return map[string]Property{}
+}
+
 // GetInt returns the property value converted to an int64.
 //
 // If the value is numeric but not int64, e.g. int8, uint32, float64, etc., it
@@ -76,6 +80,61 @@ func (pr Properties) GetString(name string, fallback ...string) (string, error) 
 		return "", ErrPropertyNotFound
 	}
 	return prop.AsString()
+}
+
+func (pr Properties) Add(name string, value any) Properties {
+	prop := Property{
+		Name:  name,
+		Type:  DataType(0),
+		Value: value,
+	}
+
+	switch v := value.(type) {
+	case int:
+		prop.Type = DataTypeInt64
+		prop.Value = int64(v)
+	case uint:
+		prop.Type = DataTypeUint64
+		prop.Value = uint64(v)
+	case int8:
+		prop.Type = DataTypeInt8
+	case int16:
+		prop.Type = DataTypeInt16
+	case int32:
+		prop.Type = DataTypeInt32
+	case int64:
+		prop.Type = DataTypeInt64
+	case uint8:
+		prop.Type = DataTypeUint8
+	case uint16:
+		prop.Type = DataTypeUint16
+	case uint32:
+		prop.Type = DataTypeUint32
+	case uint64:
+		prop.Type = DataTypeUint64
+	case float32:
+		prop.Type = DataTypeFloat32
+	case float64:
+		prop.Type = DataTypeFloat64
+	case Float128:
+		prop.Type = DataTypeFloat128
+	case string:
+		prop.Type = DataTypeString
+	case bool:
+		prop.Type = DataTypeBool
+	case time.Time:
+		prop.Type = DataTypeTimestamp
+		prop.Value = TimeToTimestamp(v)
+	case complex64:
+		prop.Type = DataTypeComplex64
+	case complex128:
+		prop.Type = DataTypeComplex128
+	default:
+		panic(fmt.Sprintf("Unsupported property value type: %T", v))
+	}
+
+	pr[name] = prop
+	return pr
 }
 
 // Property represents a key-value property attached to a file, group, or

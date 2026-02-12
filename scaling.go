@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -179,7 +180,7 @@ func (s *LinearScaler) ReadProperties(props Properties, scaleIndex int) error {
 	}
 
 	var err error
-	pref := fmt.Sprintf("NI_Scale[%d]_Linear_")
+	pref := fmt.Sprintf("NI_Scale[%d]_Linear_", scaleIndex)
 
 	s.intercept, err = props.GetFloat(pref + "Y_Intercept")
 	if err != nil {
@@ -195,7 +196,7 @@ func (s *LinearScaler) ReadProperties(props Properties, scaleIndex int) error {
 }
 
 func (s *LinearScaler) Scale(values any, _otherInputs ...any) (any, error) {
-	out := make([]float64, len(values.([]any)))
+	out := make([]float64, reflect.ValueOf(values).Len())
 
 	switch v := values.(type) {
 	case []int8:
@@ -221,7 +222,8 @@ func (s *LinearScaler) Scale(values any, _otherInputs ...any) (any, error) {
 	default:
 		return nil, fmt.Errorf("unsupported type for linear scaling: %T", v)
 	}
-	return nil, nil
+
+	return out, nil
 }
 
 func (s *LinearScaler) Type() ScaleType {
@@ -244,14 +246,10 @@ func (s *PolynomialScaler) ReadProperties(props Properties, scaleIndex int) erro
 		return err
 	}
 
-	pref := fmt.Sprintf("NI_Scale[%d]_Polynomial_")
+	pref := fmt.Sprintf("NI_Scale[%d]_Polynomial_", scaleIndex)
 
-	numCoefficients, err := props.GetUint(pref + "Coefficients_Size")
-	if errors.Is(err, ErrPropertyNotFound) {
-		// Fall back to 4, following npTDMS behaviour. Not sure whether this is
-		// based on anything legit or not.
-		numCoefficients = 4
-	} else if err != nil {
+	numCoefficients, err := props.GetUint(pref+"Coefficients_Size", 4)
+	if err != nil {
 		return fmt.Errorf("failed to read number of coefficients: %w", err)
 	}
 
@@ -267,7 +265,7 @@ func (s *PolynomialScaler) ReadProperties(props Properties, scaleIndex int) erro
 }
 
 func (s *PolynomialScaler) Scale(values any, _otherInputs ...any) (any, error) {
-	out := make([]float64, len(values.([]any)))
+	out := make([]float64, reflect.ValueOf(values).Len())
 
 	switch v := values.(type) {
 	case []int8:
@@ -376,7 +374,7 @@ func (s *RTDScaler) ReadProperties(props Properties, scaleIndex int) error {
 }
 
 func (s *RTDScaler) Scale(values any, _otherInputs ...any) (any, error) {
-	out := make([]float64, len(values.([]any)))
+	out := make([]float64, reflect.ValueOf(values).Len())
 
 	switch v := values.(type) {
 	case []int8:
@@ -538,7 +536,7 @@ func (s *StrainScaler) ReadProperties(props Properties, scaleIndex int) error {
 }
 
 func (s *StrainScaler) Scale(input any, _otherInputs ...any) (any, error) {
-	out := make([]float64, len(input.([]any)))
+	out := make([]float64, reflect.ValueOf(input).Len())
 	var err error
 
 	switch v := input.(type) {
@@ -668,7 +666,7 @@ func strainScale[T Numeric](s *StrainScaler, values []T, out []float64) error {
 			out[i] = (2 / g) * (1/(1+2*vo/vex) - 1)
 			out[i] *= la
 		default:
-			return fmt.Errorf("unsupported strain gauge configuration: %d", s.configuration)
+			return fmt.Errorf("%w: %d", ErrUnsupportedStrainConfiguration, s.configuration)
 		}
 
 		out[i] *= ga
@@ -743,7 +741,7 @@ func (s *TableScaler) ReadProperties(props Properties, scaleIndex int) error {
 }
 
 func (s *TableScaler) Scale(input any, _otherInputs ...any) (any, error) {
-	out := make([]float64, len(input.([]any)))
+	out := make([]float64, reflect.ValueOf(input).Len())
 
 	switch v := input.(type) {
 	case []int8:
@@ -859,7 +857,7 @@ func (s *ThermistorScaler) ReadProperties(props Properties, scaleIndex int) erro
 }
 
 func (s *ThermistorScaler) Scale(input any, _otherInputs ...any) (any, error) {
-	out := make([]float64, len(input.([]any)))
+	out := make([]float64, reflect.ValueOf(input).Len())
 	var err error
 
 	switch v := input.(type) {
@@ -914,7 +912,7 @@ func thermistorScale[T Numeric](s *ThermistorScaler, input []T, out []float64) e
 			// Rt = R1 / [(Vex / Vo) - 1]
 			rt = s.r1ReferenceResistance / (s.excitationValue/float64(v) - 1)
 		default:
-			return fmt.Errorf("unsupported excitation type: %v", s.excitationType)
+			return fmt.Errorf("%w: %v", ErrUnsupportedExcitationType, s.excitationType)
 		}
 
 		rt = adjustForLeadResistance(rt, s.excitationType, s.resistanceConfiguration, s.leadWireResistance)
@@ -978,7 +976,7 @@ func (s *ThermocoupleScaler) ReadProperties(props Properties, scaleIndex int) er
 }
 
 func (s *ThermocoupleScaler) Scale(input any, _otherInputs ...any) (any, error) {
-	out := make([]float64, len(input.([]any)))
+	out := make([]float64, reflect.ValueOf(input).Len())
 
 	switch v := input.(type) {
 	case []int8:
@@ -1049,7 +1047,7 @@ func (s *AddScaler) Scale(input any, otherInputs ...any) (any, error) {
 		return nil, errors.New("expected exactly one other input")
 	}
 
-	out := make([]any, len(input.([]any)))
+	out := make([]any, reflect.ValueOf(input).Len())
 
 	v2 := otherInputs[0]
 
@@ -1121,7 +1119,7 @@ func (s *SubtractScaler) Scale(input any, otherInputs ...any) (any, error) {
 		return nil, errors.New("expected exactly one other input")
 	}
 
-	out := make([]any, len(input.([]any)))
+	out := make([]any, reflect.ValueOf(input).Len())
 
 	v2 := otherInputs[0]
 
@@ -1176,7 +1174,7 @@ func (s *ReciprocalScaler) ReadProperties(props Properties, scaleIndex int) erro
 }
 
 func (s *ReciprocalScaler) Scale(input any, _otherInputs ...any) (any, error) {
-	out := make([]any, len(input.([]any)))
+	out := make([]any, reflect.ValueOf(input).Len())
 
 	switch v := input.(type) {
 	case []int8:
@@ -1274,7 +1272,7 @@ func (m *Multiscaler) computeScalings(input any, scaleIndex int) (any, error) {
 	}
 }
 
-// getChannelScaling retrieves the scaling for a specific channel.
+// getChannelScaler retrieves the scaling for a specific channel.
 //
 // If the scaling is defined in the channel object itself, we use that.
 // Otherwise we fall back to the group object, then the file object.
@@ -1282,23 +1280,23 @@ func (m *Multiscaler) computeScalings(input any, scaleIndex int) (any, error) {
 // We assume that the scaling does not change between segments. According to the
 // spec, it is possible for scalings to change between segments but in practice
 // LabVIEW does not do this.
-func getChannelScaling(channel *Channel, group *Group, file *File) (*Multiscaler, error) {
+func getChannelScaler(channel *Channel, group *Group, file *File) (*Multiscaler, error) {
 	channelObj := file.objects[channel.path]
-	if channelScaler, err := getObjectScaling(&channelObj); err != nil {
+	if channelScaler, err := getObjectScaler(&channelObj); err != nil {
 		return nil, err
 	} else if channelScaler != nil {
 		return channelScaler, nil
 	}
 
 	groupObj := file.objects[group.path]
-	if groupScaler, err := getObjectScaling(&groupObj); err != nil {
+	if groupScaler, err := getObjectScaler(&groupObj); err != nil {
 		return nil, err
 	} else if groupScaler != nil {
 		return groupScaler, nil
 	}
 
 	fileObj := file.objects[""]
-	if fileScaler, err := getObjectScaling(&fileObj); err != nil {
+	if fileScaler, err := getObjectScaler(&fileObj); err != nil {
 		return nil, err
 	} else if fileScaler != nil {
 		return fileScaler, nil
@@ -1311,7 +1309,7 @@ func getChannelScaling(channel *Channel, group *Group, file *File) (*Multiscaler
 // scaling to a whole group or file which then applies to all channels inside
 // that group/file, you should use [getScaling] instead to retrieve the scaling
 // for actual use.
-func getObjectScaling(obj *object) (*Multiscaler, error) {
+func getObjectScaler(obj *object) (*Multiscaler, error) {
 	scalingType, err := obj.properties.GetString("NI_Scaling_Status", "unscaled")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get scaling type: %w", err)
@@ -1393,7 +1391,7 @@ func getObjectScaling(obj *object) (*Multiscaler, error) {
 		case ScaleTypeReciprocal:
 			scaler = &ReciprocalScaler{}
 		default:
-			return nil, fmt.Errorf("unsupported scale type: %s", scaleType)
+			return nil, fmt.Errorf("%w: %s", ErrUnsupportedScaler, scaleType)
 		}
 
 		if err := scaler.ReadProperties(obj.properties, scaleIndex); err != nil {

@@ -23,4 +23,13 @@ var (
 
 	// ErrPropertyNotFound indicates that a property was not found in the given object.
 	ErrPropertyNotFound = errors.New("property not found")
+
+	// ErrUnsupportedScaler scaler type in object metadata is not supported by this library.
+	ErrUnsupportedScaler = errors.New("unsupported scaler type")
+
+	// ErrUnsupportedStrainConfiguration strain gauge configuration is not supported by this library.
+	ErrUnsupportedStrainConfiguration = errors.New("unsupported strain gauge configuration")
+
+	// ErrUnsupportedExcitationType excitation type is not supported by this library.
+	ErrUnsupportedExcitationType = errors.New("unsupported excitation type")
 )

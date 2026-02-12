@@ -81,7 +81,7 @@ const (
 
 const fractionsPerNs uint64 = 18_446_744_073 // 2 ** 64 / 10 ** 9
 
-var tdmsEpoch int64 = time.Date(1904, 1, 1, 0, 0, 0, 0, nil).Unix()
+var tdmsEpoch int64 = time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
 
 // Size returns the size in bytes of a single value of this data type.
 // Returns 0 for variable-length types like strings.
@@ -376,4 +376,11 @@ func (t *Timestamp) AsTime() time.Time {
 // representation of the timestamp as a time.Time value.
 func (t *Timestamp) String() string {
 	return t.AsTime().String()
+}
+
+func TimeToTimestamp(t time.Time) Timestamp {
+	return Timestamp{
+		Timestamp: t.Unix() + tdmsEpoch,
+		Remainder: uint64(t.Nanosecond()) * fractionsPerNs,
+	}
 }
