@@ -20,6 +20,11 @@ import (
 
 type interpreter[T any] func([]byte, binary.ByteOrder) T
 
+// TODO: Handle DAQmx data.
+// TODO: Use channels instead of iterator.
+// TODO: Add generic ReadData() to channel that returns any so that end user can handle type switch.
+// TODO: Add ReadDataAsBytes() to not interpret the data at all.
+
 // StreamReader returns an iterator yielding individual values from the channel.
 //
 // It internally uses batching for performance, but unwraps the batches
@@ -85,7 +90,7 @@ func BatchStreamReader[T any](
 		buf := make([]byte, batchSize*dataSize)
 		bufLen := uint64(len(buf))
 		batch := make([]T, batchSize)
-		r := ch.f.f
+		r := ch.reader
 
 		for _, chunk := range ch.dataChunks {
 			if _, err := r.Seek(chunk.offset, io.SeekStart); err != nil {

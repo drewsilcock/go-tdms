@@ -2,6 +2,7 @@ package tdms
 
 import (
 	"encoding/binary"
+	"io"
 	"iter"
 	"time"
 )
@@ -19,9 +20,9 @@ type Channel struct {
 	DataType DataType
 
 	// Properties contains all properties associated with this channel.
-	Properties map[string]Property
+	Properties Properties
 
-	f              *File
+	reader         io.ReadSeeker
 	path           string
 	dataChunks     []dataChunk
 	totalNumValues uint64
@@ -45,11 +46,6 @@ type dataChunk struct {
 	size          uint64
 	numValues     uint64
 	stride        int64
-}
-
-// Group returns the [Group] that this channel belongs to.
-func (ch *Channel) Group() Group {
-	return ch.f.Groups[ch.GroupName]
 }
 
 // NumValues returns the total number of data values in this channel across all

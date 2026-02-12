@@ -20,4 +20,7 @@ var (
 
 	// ErrIncorrectType indicates that a type assertion or conversion failed because the actual type differs from the expected type.
 	ErrIncorrectType = errors.New("incorrect data type")
+
+	// ErrPropertyNotFound indicates that a property was not found in the given object.
+	ErrPropertyNotFound = errors.New("property not found")
 )

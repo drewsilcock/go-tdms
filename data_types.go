@@ -79,6 +79,10 @@ const (
 	DataTypeDAQmxRawData DataType = 0xFFFFFFFF
 )
 
+const fractionsPerNs uint64 = 18_446_744_073 // 2 ** 64 / 10 ** 9
+
+var tdmsEpoch int64 = time.Date(1904, 1, 1, 0, 0, 0, 0, nil).Unix()
+
 // Size returns the size in bytes of a single value of this data type.
 // Returns 0 for variable-length types like strings.
 func (dt DataType) Size() int {
@@ -365,13 +369,7 @@ type Timestamp struct {
 // information than [time.Time]. This precision loss is not relevant for most
 // purposes, but important to keep in mind for high-precision applications.
 func (t *Timestamp) AsTime() time.Time {
-	// I'm not sure whether this big.Int stuff is necessary as opposed to doing
-	// `float64(posFractions) * math.Pow(2, -64) * 1e9`. I need to experiment
-	// with some large values to determine.
-	ns := new(big.Int).SetUint64(t.Remainder)
-	ns.Mul(ns, big.NewInt(1e9))
-	ns.Rsh(ns, 64)
-	return time.Unix(t.Timestamp, ns.Int64())
+	return time.Unix(t.Timestamp-tdmsEpoch, int64(t.Remainder/fractionsPerNs))
 }
 
 // String implements the [fmt.Stringer] interface, returning the string
