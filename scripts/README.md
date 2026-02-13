@@ -13,3 +13,15 @@ We're not currently generating malformed files for testing – that could be an 
 ## How do I run it?
 
 Install uv and then run `cd scripts && uv run generate-test-files.py ../tests/testdata`.
+
+## Todo
+
+- Get rid of Scaler.Type(), it's not needed.
+- Impl WithScaling option.
+- Add data reading that converts to the type you want.
+- Implement DAQmx scalers.
+- Add more testing.
+- Add benchmarks.
+- Add benchmarking to CI.
+- Change data streaming to use channel instead of yield iterator.
+- Most of the scalers can re-use the input array instead of allocating a whole new one. Might require a little bit of reflection to check the slice types but can be done.
