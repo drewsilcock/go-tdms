@@ -107,10 +107,6 @@ func (s *formatChangingScaler) Scale(_input any, _otherInputs ...any) (any, erro
 	return nil, nil
 }
 
-func (s *formatChangingScaler) Type() ScaleType {
-	return ScaleTypeDAQmxFormatChanging
-}
-
 type digitalLineScaler daqmxScaler
 
 func (s *digitalLineScaler) ReadProperties(_props Properties, _scaleIndex int) error {
@@ -121,8 +117,4 @@ func (s *digitalLineScaler) ReadProperties(_props Properties, _scaleIndex int) e
 func (s *digitalLineScaler) Scale(_input any, _otherInputs ...any) (any, error) {
 	// TODO: Figure out how to represent this.
 	return nil, nil
-}
-
-func (s *digitalLineScaler) Type() ScaleType {
-	return ScaleTypeDAQmxDigitalLine
 }

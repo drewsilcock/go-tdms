@@ -120,9 +120,6 @@ type Scaler interface {
 	// Invoking this function with anything other than a slice as input is
 	// invalid and will result in a panic.
 	Scale(any, ...any) (any, error)
-
-	// Type returns the type of the scaler.
-	Type() ScaleType
 }
 
 type baseScaler struct {
@@ -161,10 +158,6 @@ func (s *NoOpScaler) ReadProperties(props Properties, scaleIndex int) error {
 
 func (s *NoOpScaler) Scale(input any, _otherInputs ...any) (any, error) {
 	return input, nil
-}
-
-func (s *NoOpScaler) Type() ScaleType {
-	return ScaleTypeAdvancedAPI
 }
 
 type LinearScaler struct {
@@ -224,10 +217,6 @@ func (s *LinearScaler) Scale(values any, _otherInputs ...any) (any, error) {
 	}
 
 	return out, nil
-}
-
-func (s *LinearScaler) Type() ScaleType {
-	return ScaleTypeLinear
 }
 
 func linearScale[T Numeric](s *LinearScaler, values []T, out []float64) {
@@ -293,10 +282,6 @@ func (s *PolynomialScaler) Scale(values any, _otherInputs ...any) (any, error) {
 	}
 
 	return out, nil
-}
-
-func (s *PolynomialScaler) Type() ScaleType {
-	return ScaleTypePolynomial
 }
 
 // Calculate c[0] + c[1]*x + c[2]*x^2 + ... + c[N-1]*x^(N-1) where c is the
@@ -402,10 +387,6 @@ func (s *RTDScaler) Scale(values any, _otherInputs ...any) (any, error) {
 	}
 
 	return out, nil
-}
-
-func (s *RTDScaler) Type() ScaleType {
-	return ScaleTypeRTD
 }
 
 func scaleRTD[T Numeric](s *RTDScaler, values []T, out []float64) {
@@ -569,10 +550,6 @@ func (s *StrainScaler) Scale(input any, _otherInputs ...any) (any, error) {
 	}
 
 	return out, nil
-}
-
-func (s *StrainScaler) Type() ScaleType {
-	return ScaleTypeStrain
 }
 
 func strainScale[T Numeric](s *StrainScaler, values []T, out []float64) error {
@@ -771,12 +748,10 @@ func (s *TableScaler) Scale(input any, _otherInputs ...any) (any, error) {
 	return out, nil
 }
 
-func (s *TableScaler) Type() ScaleType {
-	return ScaleTypeTable
-}
-
 func tableScale[T Numeric](s *TableScaler, input []T, out []float64) {
-	interp(input, s.inputValues, s.outputValues, nil, nil)
+	for i, v := range input {
+		out[i] = interp(v, s.inputValues, s.outputValues, nil, nil)
+	}
 }
 
 // ThermistorScaler calculates the temperature of a thermistor from the resistance.
@@ -892,10 +867,6 @@ func (s *ThermistorScaler) Scale(input any, _otherInputs ...any) (any, error) {
 	return out, nil
 }
 
-func (s *ThermistorScaler) Type() ScaleType {
-	return ScaleTypeThermistor
-}
-
 func thermistorScale[T Numeric](s *ThermistorScaler, input []T, out []float64) error {
 	// Calculates the temperature of a thermistor from the resistance, using the Steinhart-Hart equation:
 	// 1/T = A + B log R + C (log R)³
@@ -1004,10 +975,6 @@ func (s *ThermocoupleScaler) Scale(input any, _otherInputs ...any) (any, error) 
 	return out, nil
 }
 
-func (s *ThermocoupleScaler) Type() ScaleType {
-	return ScaleTypeThermocouple
-}
-
 func thermocoupleScale[T Numeric](s *ThermocoupleScaler, input []T, out []float64) {
 	// Our conversion equations use millivolts but TDMS stores as microvolts.
 	for i, v := range input {
@@ -1081,10 +1048,6 @@ func (s *AddScaler) Scale(input any, otherInputs ...any) (any, error) {
 	return out, nil
 }
 
-func (s *AddScaler) Type() ScaleType {
-	return ScaleTypeAdd
-}
-
 func addScale[T Numeric | complex64 | complex128](leftValues []T, rightValues []T, out []any) {
 	for i := range leftValues {
 		out[i] = leftValues[i] + rightValues[i]
@@ -1153,10 +1116,6 @@ func (s *SubtractScaler) Scale(input any, otherInputs ...any) (any, error) {
 	return out, nil
 }
 
-func (s *SubtractScaler) Type() ScaleType {
-	return ScaleTypeSubtract
-}
-
 func subtractScale[T Numeric | ~complex64 | ~complex128](leftValues []T, rightValues []T, out []any) {
 	for i := range leftValues {
 		out[i] = leftValues[i] - rightValues[i]
@@ -1204,10 +1163,6 @@ func (s *ReciprocalScaler) Scale(input any, _otherInputs ...any) (any, error) {
 	}
 
 	return out, nil
-}
-
-func (s *ReciprocalScaler) Type() ScaleType {
-	return ScaleTypeReciprocal
 }
 
 func reciprocalScaler[T Numeric | ~complex64 | ~complex128](values []T, out []any) {
