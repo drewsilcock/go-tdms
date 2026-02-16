@@ -41,6 +41,10 @@ func interp[T Numeric](x T, xp, fp []float64, left, right *float64) float64 {
 
 	j := sort.SearchFloat64s(xp, xi)
 
+	if j == 0 {
+		return leftVal
+	}
+
 	x0, x1 := xp[j-1], xp[j]
 	y0, y1 := fp[j-1], fp[j]
 

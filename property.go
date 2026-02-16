@@ -124,7 +124,7 @@ func (pr Properties) Add(name string, value any) Properties {
 		prop.Type = DataTypeBool
 	case time.Time:
 		prop.Type = DataTypeTimestamp
-		prop.Value = TimeToTimestamp(v)
+		prop.Value = NewTimestamp(v)
 	case complex64:
 		prop.Type = DataTypeComplex64
 	case complex128:

@@ -89,296 +89,517 @@ func WithScaling(shouldScale ...bool) ReadOption {
 
 // Data streaming functions that yield each item at a time.
 
-// ReadDataAsInt8 returns an iterator that yields individual int8 values from the channel.
+// ReadInt8 returns an iterator that yields individual int8 values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsInt8(options ...ReadOption) iter.Seq2[int8, error] {
-	return StreamReader(ch, options, interpretInt8)
+func (ch *Channel) ReadInt8(options ...ReadOption) iter.Seq2[int8, error] {
+	return func(yield func(int8, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretInt8) {
+			if !yield(value.(int8), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsInt16 returns an iterator that yields individual int16 values from the channel.
+// ReadInt16 returns an iterator that yields individual int16 values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsInt16(options ...ReadOption) iter.Seq2[int16, error] {
-	return StreamReader(ch, options, interpretInt16)
+func (ch *Channel) ReadInt16(options ...ReadOption) iter.Seq2[int16, error] {
+	return func(yield func(int16, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretInt16) {
+			if !yield(value.(int16), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsInt32 returns an iterator that yields individual int32 values from the channel.
+// ReadInt32 returns an iterator that yields individual int32 values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsInt32(options ...ReadOption) iter.Seq2[int32, error] {
-	return StreamReader(ch, options, interpretInt32)
+func (ch *Channel) ReadInt32(options ...ReadOption) iter.Seq2[int32, error] {
+	return func(yield func(int32, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretInt32) {
+			if !yield(value.(int32), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsInt64 returns an iterator that yields individual int64 values from the channel.
+// ReadInt64 returns an iterator that yields individual int64 values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsInt64(options ...ReadOption) iter.Seq2[int64, error] {
-	return StreamReader(ch, options, interpretInt64)
+func (ch *Channel) ReadInt64(options ...ReadOption) iter.Seq2[int64, error] {
+	return func(yield func(int64, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretInt64) {
+			if !yield(value.(int64), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsUint8 returns an iterator that yields individual uint8 values from the channel.
+// ReadUint8 returns an iterator that yields individual uint8 values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsUint8(options ...ReadOption) iter.Seq2[uint8, error] {
-	return StreamReader(ch, options, interpretUint8)
+func (ch *Channel) ReadUint8(options ...ReadOption) iter.Seq2[uint8, error] {
+	return func(yield func(uint8, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretUint8) {
+			if !yield(value.(uint8), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsUint16 returns an iterator that yields individual uint16 values from the channel.
+// ReadUint16 returns an iterator that yields individual uint16 values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsUint16(options ...ReadOption) iter.Seq2[uint16, error] {
-	return StreamReader(ch, options, interpretUint16)
+func (ch *Channel) ReadUint16(options ...ReadOption) iter.Seq2[uint16, error] {
+	return func(yield func(uint16, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretUint16) {
+			if !yield(value.(uint16), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsUint32 returns an iterator that yields individual uint32 values from the channel.
+// ReadUint32 returns an iterator that yields individual uint32 values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsUint32(options ...ReadOption) iter.Seq2[uint32, error] {
-	return StreamReader(ch, options, interpretUint32)
+func (ch *Channel) ReadUint32(options ...ReadOption) iter.Seq2[uint32, error] {
+	return func(yield func(uint32, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretUint32) {
+			if !yield(value.(uint32), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsUint64 returns an iterator that yields individual uint64 values from the channel.
+// ReadUint64 returns an iterator that yields individual uint64 values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsUint64(options ...ReadOption) iter.Seq2[uint64, error] {
-	return StreamReader(ch, options, interpretUint64)
+func (ch *Channel) ReadUint64(options ...ReadOption) iter.Seq2[uint64, error] {
+	return func(yield func(uint64, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretUint64) {
+			if !yield(value.(uint64), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsFloat32 returns an iterator that yields individual float32 values from the channel.
+// ReadFloat32 returns an iterator that yields individual float32 values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsFloat32(options ...ReadOption) iter.Seq2[float32, error] {
-	return StreamReader(ch, options, interpretFloat32)
+func (ch *Channel) ReadFloat32(options ...ReadOption) iter.Seq2[float32, error] {
+	return func(yield func(float32, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretFloat32) {
+			if !yield(value.(float32), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsFloat64 returns an iterator that yields individual float64 values from the channel.
+// ReadFloat64 returns an iterator that yields individual float64 values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsFloat64(options ...ReadOption) iter.Seq2[float64, error] {
-	return StreamReader(ch, options, interpretFloat64)
+func (ch *Channel) ReadFloat64(options ...ReadOption) iter.Seq2[float64, error] {
+	return func(yield func(float64, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretFloat64) {
+			if !yield(value.(float64), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsFloat128 returns an iterator that yields individual [Float128] values from the channel.
+// ReadFloat128 returns an iterator that yields individual [Float128] values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsFloat128(options ...ReadOption) iter.Seq2[Float128, error] {
-	return StreamReader(ch, options, interpretFloat128)
+func (ch *Channel) ReadFloat128(options ...ReadOption) iter.Seq2[Float128, error] {
+	return func(yield func(Float128, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretFloat128) {
+			if !yield(value.(Float128), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsString returns an iterator that yields individual string values from the channel.
+// ReadString returns an iterator that yields individual string values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsString(options ...ReadOption) iter.Seq2[string, error] {
-	return StreamReader(ch, options, interpretString)
+func (ch *Channel) ReadString(options ...ReadOption) iter.Seq2[string, error] {
+	return func(yield func(string, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretString) {
+			if !yield(value.(string), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsBool returns an iterator that yields individual bool values from the channel.
+// ReadBool returns an iterator that yields individual bool values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsBool(options ...ReadOption) iter.Seq2[bool, error] {
-	return StreamReader(ch, options, interpretBool)
+func (ch *Channel) ReadBool(options ...ReadOption) iter.Seq2[bool, error] {
+	return func(yield func(bool, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretBool) {
+			if !yield(value.(bool), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsTimestamp returns an iterator that yields individual [Timestamp] values from the channel.
+// ReadTimestamp returns an iterator that yields individual [Timestamp] values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsTimestamp(options ...ReadOption) iter.Seq2[Timestamp, error] {
-	return StreamReader(ch, options, interpretTimestamp)
+func (ch *Channel) ReadTimestamp(options ...ReadOption) iter.Seq2[Timestamp, error] {
+	return func(yield func(Timestamp, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretTimestamp) {
+			if !yield(value.(Timestamp), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsTime returns an iterator that yields individual [time.Time] values from the channel.
+// ReadTime returns an iterator that yields individual [time.Time] values from the channel.
 // Timestamps are automatically converted from TDMS format. Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsTime(options ...ReadOption) iter.Seq2[time.Time, error] {
-	return StreamReader(ch, options, interpretTime)
+func (ch *Channel) ReadTime(options ...ReadOption) iter.Seq2[time.Time, error] {
+	return func(yield func(time.Time, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretTime) {
+			if !yield(value.(time.Time), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsComplex64 returns an iterator that yields individual complex64 values from the channel.
+// ReadComplex64 returns an iterator that yields individual complex64 values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsComplex64(options ...ReadOption) iter.Seq2[complex64, error] {
-	return StreamReader(ch, options, interpretComplex64)
+func (ch *Channel) ReadComplex64(options ...ReadOption) iter.Seq2[complex64, error] {
+	return func(yield func(complex64, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretComplex64) {
+			if !yield(value.(complex64), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsComplex128 returns an iterator that yields individual complex128 values from the channel.
+// ReadComplex128 returns an iterator that yields individual complex128 values from the channel.
 // Use BatchSize option to control internal buffer size.
-func (ch *Channel) ReadDataAsComplex128(options ...ReadOption) iter.Seq2[complex128, error] {
-	return StreamReader(ch, options, interpretComplex128)
+func (ch *Channel) ReadComplex128(options ...ReadOption) iter.Seq2[complex128, error] {
+	return func(yield func(complex128, error) bool) {
+		for value, err := range StreamReader(ch, options, interpretComplex128) {
+			if !yield(value.(complex128), err) {
+				return
+			}
+		}
+	}
 }
 
 // Data streaming functions that yield items in batches.
 
-// ReadDataAsInt8Batch returns an iterator that yields batches of int8 values from the channel.
+// ReadInt8Batch returns an iterator that yields batches of int8 values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsInt8Batch(options ...ReadOption) iter.Seq2[[]int8, error] {
-	return BatchStreamReader(ch, options, DataTypeInt8, interpretInt8)
+func (ch *Channel) ReadInt8Batch(options ...ReadOption) iter.Seq2[[]int8, error] {
+	return func(yield func([]int8, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretInt8) {
+			if !yield(value.([]int8), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsInt16Batch returns an iterator that yields batches of int16 values from the channel.
+// ReadInt16Batch returns an iterator that yields batches of int16 values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsInt16Batch(options ...ReadOption) iter.Seq2[[]int16, error] {
-	return BatchStreamReader(ch, options, DataTypeInt16, interpretInt16)
+func (ch *Channel) ReadInt16Batch(options ...ReadOption) iter.Seq2[[]int16, error] {
+	return func(yield func([]int16, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretInt16) {
+			if !yield(value.([]int16), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsInt32Batch returns an iterator that yields batches of int32 values from the channel.
+// ReadInt32Batch returns an iterator that yields batches of int32 values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsInt32Batch(options ...ReadOption) iter.Seq2[[]int32, error] {
-	return BatchStreamReader(ch, options, DataTypeInt32, interpretInt32)
+func (ch *Channel) ReadInt32Batch(options ...ReadOption) iter.Seq2[[]int32, error] {
+	return func(yield func([]int32, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretInt32) {
+			if !yield(value.([]int32), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsInt64Batch returns an iterator that yields batches of int64 values from the channel.
+// ReadInt64Batch returns an iterator that yields batches of int64 values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsInt64Batch(options ...ReadOption) iter.Seq2[[]int64, error] {
-	return BatchStreamReader(ch, options, DataTypeInt64, interpretInt64)
+func (ch *Channel) ReadInt64Batch(options ...ReadOption) iter.Seq2[[]int64, error] {
+	return func(yield func([]int64, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretInt64) {
+			if !yield(value.([]int64), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsUint8Batch returns an iterator that yields batches of uint8 values from the channel.
+// ReadUint8Batch returns an iterator that yields batches of uint8 values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsUint8Batch(options ...ReadOption) iter.Seq2[[]uint8, error] {
-	return BatchStreamReader(ch, options, DataTypeUint8, interpretUint8)
+func (ch *Channel) ReadUint8Batch(options ...ReadOption) iter.Seq2[[]uint8, error] {
+	return func(yield func([]uint8, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretUint8) {
+			if !yield(value.([]uint8), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsUint16Batch returns an iterator that yields batches of uint16 values from the channel.
+// ReadUint16Batch returns an iterator that yields batches of uint16 values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsUint16Batch(options ...ReadOption) iter.Seq2[[]uint16, error] {
-	return BatchStreamReader(ch, options, DataTypeUint16, interpretUint16)
+func (ch *Channel) ReadUint16Batch(options ...ReadOption) iter.Seq2[[]uint16, error] {
+	return func(yield func([]uint16, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretUint16) {
+			if !yield(value.([]uint16), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsUint32Batch returns an iterator that yields batches of uint32 values from the channel.
+// ReadUint32Batch returns an iterator that yields batches of uint32 values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsUint32Batch(options ...ReadOption) iter.Seq2[[]uint32, error] {
-	return BatchStreamReader(ch, options, DataTypeUint32, interpretUint32)
+func (ch *Channel) ReadUint32Batch(options ...ReadOption) iter.Seq2[[]uint32, error] {
+	return func(yield func([]uint32, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretUint32) {
+			if !yield(value.([]uint32), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsUint64Batch returns an iterator that yields batches of uint64 values from the channel.
+// ReadUint64Batch returns an iterator that yields batches of uint64 values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsUint64Batch(options ...ReadOption) iter.Seq2[[]uint64, error] {
-	return BatchStreamReader(ch, options, DataTypeUint64, interpretUint64)
+func (ch *Channel) ReadUint64Batch(options ...ReadOption) iter.Seq2[[]uint64, error] {
+	return func(yield func([]uint64, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretUint64) {
+			if !yield(value.([]uint64), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsFloat32Batch returns an iterator that yields batches of float32 values from the channel.
+// ReadFloat32Batch returns an iterator that yields batches of float32 values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsFloat32Batch(options ...ReadOption) iter.Seq2[[]float32, error] {
-	return BatchStreamReader(ch, options, DataTypeFloat32, interpretFloat32)
+func (ch *Channel) ReadFloat32Batch(options ...ReadOption) iter.Seq2[[]float32, error] {
+	return func(yield func([]float32, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretFloat32) {
+			if !yield(value.([]float32), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsFloat64Batch returns an iterator that yields batches of float64 values from the channel.
+// ReadFloat64Batch returns an iterator that yields batches of float64 values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsFloat64Batch(options ...ReadOption) iter.Seq2[[]float64, error] {
-	return BatchStreamReader(ch, options, DataTypeFloat64, interpretFloat64)
+func (ch *Channel) ReadFloat64Batch(options ...ReadOption) iter.Seq2[[]float64, error] {
+	return func(yield func([]float64, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretFloat64) {
+			if !yield(value.([]float64), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsFloat128Batch returns an iterator that yields batches of [Float128] values from the channel.
+// ReadFloat128Batch returns an iterator that yields batches of [Float128] values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsFloat128Batch(options ...ReadOption) iter.Seq2[[]Float128, error] {
-	return BatchStreamReader(ch, options, DataTypeFloat128, interpretFloat128)
+func (ch *Channel) ReadFloat128Batch(options ...ReadOption) iter.Seq2[[]Float128, error] {
+	return func(yield func([]Float128, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretFloat128) {
+			if !yield(value.([]Float128), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsStringBatch returns an iterator that yields batches of string values from the channel.
+// ReadStringBatch returns an iterator that yields batches of string values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsStringBatch(options ...ReadOption) iter.Seq2[[]string, error] {
-	return BatchStreamReader(ch, options, DataTypeString, interpretString)
+func (ch *Channel) ReadStringBatch(options ...ReadOption) iter.Seq2[[]string, error] {
+	return func(yield func([]string, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretString) {
+			if !yield(value.([]string), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsBoolBatch returns an iterator that yields batches of bool values from the channel.
+// ReadBoolBatch returns an iterator that yields batches of bool values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsBoolBatch(options ...ReadOption) iter.Seq2[[]bool, error] {
-	return BatchStreamReader(ch, options, DataTypeBool, interpretBool)
+func (ch *Channel) ReadBoolBatch(options ...ReadOption) iter.Seq2[[]bool, error] {
+	return func(yield func([]bool, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretBool) {
+			if !yield(value.([]bool), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsTimestampBatch returns an iterator that yields batches of [Timestamp] values from the channel.
+// ReadTimestampBatch returns an iterator that yields batches of [Timestamp] values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsTimestampBatch(options ...ReadOption) iter.Seq2[[]Timestamp, error] {
-	return BatchStreamReader(ch, options, DataTypeTimestamp, interpretTimestamp)
+func (ch *Channel) ReadTimestampBatch(options ...ReadOption) iter.Seq2[[]Timestamp, error] {
+	return func(yield func([]Timestamp, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretTimestamp) {
+			if !yield(value.([]Timestamp), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsTimeBatch returns an iterator that yields batches of [time.Time] values from the channel.
+// ReadTimeBatch returns an iterator that yields batches of [time.Time] values from the channel.
 // Timestamps are automatically converted from TDMS format. Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsTimeBatch(options ...ReadOption) iter.Seq2[[]time.Time, error] {
-	return BatchStreamReader(ch, options, DataTypeTimestamp, interpretTime)
+func (ch *Channel) ReadTimeBatch(options ...ReadOption) iter.Seq2[[]time.Time, error] {
+	return func(yield func([]time.Time, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretTime) {
+			if !yield(value.([]time.Time), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsComplex64Batch returns an iterator that yields batches of complex64 values from the channel.
+// ReadComplex64Batch returns an iterator that yields batches of complex64 values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsComplex64Batch(options ...ReadOption) iter.Seq2[[]complex64, error] {
-	return BatchStreamReader(ch, options, DataTypeComplex64, interpretComplex64)
+func (ch *Channel) ReadComplex64Batch(options ...ReadOption) iter.Seq2[[]complex64, error] {
+	return func(yield func([]complex64, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretComplex64) {
+			if !yield(value.([]complex64), err) {
+				return
+			}
+		}
+	}
 }
 
-// ReadDataAsComplex128Batch returns an iterator that yields batches of complex128 values from the channel.
+// ReadComplex128Batch returns an iterator that yields batches of complex128 values from the channel.
 // Use BatchSize option to control batch size.
-func (ch *Channel) ReadDataAsComplex128Batch(options ...ReadOption) iter.Seq2[[]complex128, error] {
-	return BatchStreamReader(ch, options, DataTypeComplex128, interpretComplex128)
+func (ch *Channel) ReadComplex128Batch(options ...ReadOption) iter.Seq2[[]complex128, error] {
+	return func(yield func([]complex128, error) bool) {
+		for value, err := range BatchStreamReader(ch, options, interpretComplex128) {
+			if !yield(value.([]complex128), err) {
+				return
+			}
+		}
+	}
 }
 
 // Data streaming functions that read all the data for a channel in one go.
 
-// ReadDataInt8All reads all int8 values from the channel into a single slice.
-func (ch *Channel) ReadDataInt8All(options ...ReadOption) ([]int8, error) {
-	return readAllData(ch, options, DataTypeInt8, interpretInt8)
+// ReadInt8All reads all int8 values from the channel into a single slice.
+func (ch *Channel) ReadInt8All(options ...ReadOption) ([]int8, error) {
+	values, err := readAllData(ch, options, interpretInt8)
+	return values.([]int8), err
 }
 
-// ReadDataInt16All reads all int16 values from the channel into a single slice.
-func (ch *Channel) ReadDataInt16All(options ...ReadOption) ([]int16, error) {
-	return readAllData(ch, options, DataTypeInt16, interpretInt16)
+// ReadInt16All reads all int16 values from the channel into a single slice.
+func (ch *Channel) ReadInt16All(options ...ReadOption) ([]int16, error) {
+	values, err := readAllData(ch, options, interpretInt16)
+	return values.([]int16), err
 }
 
-// ReadDataInt32All reads all int32 values from the channel into a single slice.
-func (ch *Channel) ReadDataInt32All(options ...ReadOption) ([]int32, error) {
-	return readAllData(ch, options, DataTypeInt32, interpretInt32)
+// ReadInt32All reads all int32 values from the channel into a single slice.
+func (ch *Channel) ReadInt32All(options ...ReadOption) ([]int32, error) {
+	values, err := readAllData(ch, options, interpretInt32)
+	return values.([]int32), err
 }
 
-// ReadDataInt64All reads all int64 values from the channel into a single slice.
-func (ch *Channel) ReadDataInt64All(options ...ReadOption) ([]int64, error) {
-	return readAllData(ch, options, DataTypeInt64, interpretInt64)
+// ReadInt64All reads all int64 values from the channel into a single slice.
+func (ch *Channel) ReadInt64All(options ...ReadOption) ([]int64, error) {
+	values, err := readAllData(ch, options, interpretInt64)
+	return values.([]int64), err
 }
 
-// ReadDataUint8All reads all uint8 values from the channel into a single slice.
-func (ch *Channel) ReadDataUint8All(options ...ReadOption) ([]uint8, error) {
-	return readAllData(ch, options, DataTypeUint8, interpretUint8)
+// ReadUint8All reads all uint8 values from the channel into a single slice.
+func (ch *Channel) ReadUint8All(options ...ReadOption) ([]uint8, error) {
+	values, err := readAllData(ch, options, interpretUint8)
+	return values.([]uint8), err
 }
 
-// ReadDataUint16All reads all uint16 values from the channel into a single slice.
-func (ch *Channel) ReadDataUint16All(options ...ReadOption) ([]uint16, error) {
-	return readAllData(ch, options, DataTypeUint16, interpretUint16)
+// ReadUint16All reads all uint16 values from the channel into a single slice.
+func (ch *Channel) ReadUint16All(options ...ReadOption) ([]uint16, error) {
+	values, err := readAllData(ch, options, interpretUint16)
+	return values.([]uint16), err
 }
 
-// ReadDataUint32All reads all uint32 values from the channel into a single slice.
-func (ch *Channel) ReadDataUint32All(options ...ReadOption) ([]uint32, error) {
-	return readAllData(ch, options, DataTypeUint32, interpretUint32)
+// ReadUint32All reads all uint32 values from the channel into a single slice.
+func (ch *Channel) ReadUint32All(options ...ReadOption) ([]uint32, error) {
+	values, err := readAllData(ch, options, interpretUint32)
+	return values.([]uint32), err
 }
 
-// ReadDataUint64All reads all uint64 values from the channel into a single slice.
-func (ch *Channel) ReadDataUint64All(options ...ReadOption) ([]uint64, error) {
-	return readAllData(ch, options, DataTypeUint64, interpretUint64)
+// ReadUint64All reads all uint64 values from the channel into a single slice.
+func (ch *Channel) ReadUint64All(options ...ReadOption) ([]uint64, error) {
+	values, err := readAllData(ch, options, interpretUint64)
+	return values.([]uint64), err
 }
 
-// ReadDataFloat32All reads all float32 values from the channel into a single slice.
-func (ch *Channel) ReadDataFloat32All(options ...ReadOption) ([]float32, error) {
-	return readAllData(ch, options, DataTypeFloat32, interpretFloat32)
+// ReadFloat32All reads all float32 values from the channel into a single slice.
+func (ch *Channel) ReadFloat32All(options ...ReadOption) ([]float32, error) {
+	values, err := readAllData(ch, options, interpretFloat32)
+	return values.([]float32), err
 }
 
-// ReadDataFloat64All reads all float64 values from the channel into a single slice.
-func (ch *Channel) ReadDataFloat64All(options ...ReadOption) ([]float64, error) {
-	return readAllData(ch, options, DataTypeFloat64, interpretFloat64)
+// ReadFloat64All reads all float64 values from the channel into a single slice.
+func (ch *Channel) ReadFloat64All(options ...ReadOption) ([]float64, error) {
+	values, err := readAllData(ch, options, interpretFloat64)
+	return values.([]float64), err
 }
 
-// ReadDataFloat128All reads all [Float128] values from the channel into a single slice.
-func (ch *Channel) ReadDataFloat128All(options ...ReadOption) ([]Float128, error) {
-	return readAllData(ch, options, DataTypeFloat128, interpretFloat128)
+// ReadFloat128All reads all [Float128] values from the channel into a single slice.
+func (ch *Channel) ReadFloat128All(options ...ReadOption) ([]Float128, error) {
+	values, err := readAllData(ch, options, interpretFloat128)
+	return values.([]Float128), err
 }
 
-// ReadDataStringAll reads all string values from the channel into a single slice.
-func (ch *Channel) ReadDataStringAll(options ...ReadOption) ([]string, error) {
-	return readAllData(ch, options, DataTypeString, interpretString)
+// ReadStringAll reads all string values from the channel into a single slice.
+func (ch *Channel) ReadStringAll(options ...ReadOption) ([]string, error) {
+	values, err := readAllData(ch, options, interpretString)
+	return values.([]string), err
 }
 
-// ReadDataBoolAll reads all bool values from the channel into a single slice.
-func (ch *Channel) ReadDataBoolAll(options ...ReadOption) ([]bool, error) {
-	return readAllData(ch, options, DataTypeBool, interpretBool)
+// ReadBoolAll reads all bool values from the channel into a single slice.
+func (ch *Channel) ReadBoolAll(options ...ReadOption) ([]bool, error) {
+	values, err := readAllData(ch, options, interpretBool)
+	return values.([]bool), err
 }
 
-// ReadDataTimestampAll reads all [Timestamp] values from the channel into a single slice.
-func (ch *Channel) ReadDataTimestampAll(options ...ReadOption) ([]Timestamp, error) {
-	return readAllData(ch, options, DataTypeTimestamp, interpretTimestamp)
+// ReadTimestampAll reads all [Timestamp] values from the channel into a single slice.
+func (ch *Channel) ReadTimestampAll(options ...ReadOption) ([]Timestamp, error) {
+	values, err := readAllData(ch, options, interpretTimestamp)
+	return values.([]Timestamp), err
 }
 
-// ReadDataTimeAll reads all [time.Time] values from the channel into a single slice.
+// ReadTimeAll reads all [time.Time] values from the channel into a single slice.
 // Timestamps are automatically converted from TDMS format.
-func (ch *Channel) ReadDataTimeAll(options ...ReadOption) ([]time.Time, error) {
-	return readAllData(ch, options, DataTypeTimestamp, interpretTime)
+func (ch *Channel) ReadTimeAll(options ...ReadOption) ([]time.Time, error) {
+	values, err := readAllData(ch, options, interpretTime)
+	return values.([]time.Time), err
 }
 
-// ReadDataComplex64All reads all complex64 values from the channel into a single slice.
-func (ch *Channel) ReadDataComplex64All(options ...ReadOption) ([]complex64, error) {
-	return readAllData(ch, options, DataTypeComplex64, interpretComplex64)
+// ReadComplex64All reads all complex64 values from the channel into a single slice.
+func (ch *Channel) ReadComplex64All(options ...ReadOption) ([]complex64, error) {
+	values, err := readAllData(ch, options, interpretComplex64)
+	return values.([]complex64), err
 }
 
-// ReadDataComplex128All reads all complex128 values from the channel into a single slice.
-func (ch *Channel) ReadDataComplex128All(options ...ReadOption) ([]complex128, error) {
-	return readAllData(ch, options, DataTypeComplex128, interpretComplex128)
+// ReadComplex128All reads all complex128 values from the channel into a single slice.
+func (ch *Channel) ReadComplex128All(options ...ReadOption) ([]complex128, error) {
+	values, err := readAllData(ch, options, interpretComplex128)
+	return values.([]complex128), err
 }

@@ -37,11 +37,6 @@ import (
 //   - https://www.ni.com/docs/en-US/bundle/labview-api-ref/page/functions/tdms-set-properties.html
 //   - https://www.ni.com/docs/en-US/bundle/labwindows-cvi/page/cvi/libref/cvitdmslibraryfunctiontree.htm
 //   - https://www.ni.com/docs/en-US/bundle/labview-api-ref/page/vi-lib/utility/tdmsutil-llb/tdms-create-scaling-information-vi.html
-//
-// TODO:
-//
-// Currently, `Scale()` returns a new output array. It might be better to re-use
-// the input array to avoid allocating another big slice?
 
 type Numeric interface {
 	~int8 | ~int16 | ~int32 | ~int64 |
@@ -96,15 +91,9 @@ const (
 	ScaleTypeSubtract     ScaleType = "Subtract"
 	ScaleTypeAdvancedAPI  ScaleType = "AdvancedAPI"
 	ScaleTypeReciprocal   ScaleType = "Reciprocal"
-
-	// These are DAQmx scalers so this string never appears in any TDMS files
-	// but we include them here to consistency and to adhere to the [Scaler]
-	// interface.
-	ScaleTypeDAQmxFormatChanging ScaleType = "DAQmxFormatChanging"
-	ScaleTypeDAQmxDigitalLine    ScaleType = "DAQmxDigitalLine"
 )
 
-var scaleTypeRegex = regexp.MustCompile(`^NI_Scale\[(\d+)\]_Scale_Type$`)
+var scaleTypeRegex = regexp.MustCompile(`^NI_Scale\[(\d+)]_Scale_Type$`)
 
 type Scaler interface {
 	ReadProperties(props Properties, scaleIndex int) error
@@ -738,15 +727,20 @@ func (s *TableScaler) ReadProperties(props Properties, scaleIndex int) error {
 
 	pref := fmt.Sprintf("NI_Scale[%d]_Table_", scaleIndex)
 
+	// The "scaled" values are the input values and the "pre-scaled" values are
+	// the output values. It's not entirely clear to me why this is. It's also
+	// poorly named – does "pre-scaled" mean "before being scaled" (like
+	// pre-nup) or "already been scaled" (like pre-cooked)?
+
 	numPreScaledValues, err := props.GetUint(pref + "Pre_Scaled_Values_Size")
 	if err != nil {
 		return fmt.Errorf("failed to read number of pre-scaled values: %w", err)
 	}
 
-	s.inputValues = make([]float64, numPreScaledValues)
+	s.outputValues = make([]float64, numPreScaledValues)
 
 	for i := range numPreScaledValues {
-		s.inputValues[i], err = props.GetFloat(fmt.Sprintf("%sPre_Scaled_Values[%d]", pref, i))
+		s.outputValues[i], err = props.GetFloat(fmt.Sprintf("%sPre_Scaled_Values[%d]", pref, i))
 		if err != nil {
 			return fmt.Errorf("failed to read pre-scaled value %d: %w", i, err)
 		}
@@ -757,10 +751,10 @@ func (s *TableScaler) ReadProperties(props Properties, scaleIndex int) error {
 		return fmt.Errorf("failed to read number of scaled values: %w", err)
 	}
 
-	s.outputValues = make([]float64, numScaledValues)
+	s.inputValues = make([]float64, numScaledValues)
 
 	for i := range numScaledValues {
-		s.outputValues[i], err = props.GetFloat(fmt.Sprintf("%sScaled_Values[%d]", pref, i))
+		s.inputValues[i], err = props.GetFloat(fmt.Sprintf("%sScaled_Values[%d]", pref, i))
 		if err != nil {
 			return fmt.Errorf("failed to read scaled value %d: %w", i, err)
 		}
@@ -995,7 +989,7 @@ func (s *ThermocoupleScaler) ReadProperties(props Properties, scaleIndex int) er
 
 	pref := fmt.Sprintf("NI_Scale[%d]_Thermocouple_", scaleIndex)
 
-	thermocoupleTypeVal, err := props.GetInt(pref+"Type", int(thermocoupleTypeJ))
+	thermocoupleTypeVal, err := props.GetInt(pref+"Thermocouple_Type", int(thermocoupleTypeJ))
 	if err != nil {
 		return fmt.Errorf("failed to read thermocouple type property: %w", err)
 	}
@@ -1019,7 +1013,7 @@ func (s *ThermocoupleScaler) ReadProperties(props Properties, scaleIndex int) er
 		s.thermocouple = thermocoupleT
 	}
 
-	s.scalingDirection, err = props.GetInt(pref+"ScalingDirection", 0)
+	s.scalingDirection, err = props.GetInt(pref+"Scaling_Direction", 0)
 	if err != nil {
 		return fmt.Errorf("failed to read scaling direction property: %w", err)
 	}
@@ -1238,16 +1232,12 @@ func reciprocalFloat64[T Numeric](values []T, output []float64) {
 }
 
 type Multiscaler struct {
-	scalers []Scaler
-	buffers []any
+	scalers    []Scaler
+	buffers    []any
+	bufferSize int
 }
 
-type dualInputBuffer struct {
-	left  any
-	right any
-}
-
-func NewMultiscaler(rawDataType DataType, batchSize int, scalers []Scaler) (*Multiscaler, error) {
+func NewMultiscaler(rawDataType DataType, bufferSize int, scalers []Scaler) (*Multiscaler, error) {
 	if len(scalers) == 0 {
 		return nil, errors.New("multiscaler requires at least one scaler")
 	}
@@ -1259,8 +1249,9 @@ func NewMultiscaler(rawDataType DataType, batchSize int, scalers []Scaler) (*Mul
 	// necessarily need to have scaler[i-1] as input (e.g. add, subtract
 	// scalers).
 	m := Multiscaler{
-		scalers: scalers,
-		buffers: make([]any, len(scalers)),
+		scalers:    scalers,
+		buffers:    make([]any, len(scalers)),
+		bufferSize: bufferSize,
 	}
 
 	dataTypes := make([]DataType, len(scalers))
@@ -1283,7 +1274,7 @@ func NewMultiscaler(rawDataType DataType, batchSize int, scalers []Scaler) (*Mul
 			return nil, fmt.Errorf("failed to get output type for scaler %d: %w", i, err)
 		}
 
-		m.buffers[i], err = allocateBuffer(outputType, batchSize)
+		m.buffers[i], err = allocateBuffer(outputType, bufferSize)
 		if err != nil {
 			return nil, fmt.Errorf("failed to allocate buffer for scaler %d: %w", i, err)
 		}
@@ -1295,6 +1286,15 @@ func NewMultiscaler(rawDataType DataType, batchSize int, scalers []Scaler) (*Mul
 }
 
 func (m *Multiscaler) Scale(input any) (any, error) {
+	// The last batch in a batch processed stream of data will be smaller, so
+	// shrink our buffers.
+	inputLen := bufferLen(input)
+	if inputLen < m.bufferSize {
+		for i := range m.buffers {
+			m.buffers[i] = sliceBuffer(m.buffers[i], 0, inputLen)
+		}
+	}
+
 	for i, scaler := range m.scalers {
 		inputs := make([]any, len(scaler.InputSources()))
 		for i, source := range scaler.InputSources() {
@@ -1321,23 +1321,25 @@ func (m *Multiscaler) Scale(input any) (any, error) {
 // We assume that the scaling does not change between segments. According to the
 // spec, it is possible for scalings to change between segments but in practice
 // LabVIEW does not do this.
-func getChannelScaler(channel *Channel, batchSize int) (*Multiscaler, error) {
+//
+// bufferSize here is the size of the buffer to be scaled.
+func getChannelScaler(channel *Channel, bufferSize int) (*Multiscaler, error) {
 	channelObj := channel.file.objects[channel.path]
-	if channelScaler, err := getObjectScaler(&channelObj, batchSize); err != nil {
+	if channelScaler, err := getObjectScaler(&channelObj, channel.DataType, bufferSize); err != nil {
 		return nil, err
 	} else if channelScaler != nil {
 		return channelScaler, nil
 	}
 
 	groupObj := channel.file.objects[channel.file.Groups[channel.GroupName].path]
-	if groupScaler, err := getObjectScaler(&groupObj, batchSize); err != nil {
+	if groupScaler, err := getObjectScaler(&groupObj, channel.DataType, bufferSize); err != nil {
 		return nil, err
 	} else if groupScaler != nil {
 		return groupScaler, nil
 	}
 
 	fileObj := channel.file.objects[""]
-	if fileScaler, err := getObjectScaler(&fileObj, batchSize); err != nil {
+	if fileScaler, err := getObjectScaler(&fileObj, channel.DataType, bufferSize); err != nil {
 		return nil, err
 	} else if fileScaler != nil {
 		return fileScaler, nil
@@ -1350,7 +1352,12 @@ func getChannelScaler(channel *Channel, batchSize int) (*Multiscaler, error) {
 // scaling to a whole group or file which then applies to all channels inside
 // that group/file, you should use [getScaling] instead to retrieve the scaling
 // for actual use.
-func getObjectScaler(obj *object, batchSize int) (*Multiscaler, error) {
+//
+// We need to pass the data type in here instead of reading it from the object
+// because sometimes the scaler is applied to the group or file-level in which
+// case there will be no raw data index and thus no data type within the object
+// itself.
+func getObjectScaler(obj *object, dataType DataType, bufferSize int) (*Multiscaler, error) {
 	scalingType, err := obj.properties.GetString("NI_Scaling_Status", "unscaled")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get scaling type: %w", err)
@@ -1396,6 +1403,8 @@ func getObjectScaler(obj *object, batchSize int) (*Multiscaler, error) {
 				scalers[scaleIndex] = ptr(formatChangingScaler(scaler))
 			case daqmxScalerTypeDigitalLine:
 				scalers[scaleIndex] = ptr(digitalLineScaler(scaler))
+			default:
+				return nil, fmt.Errorf("unsupported DAQmx scaler type: %d", obj.index.daqmxScalerType)
 			}
 
 			continue
@@ -1442,7 +1451,7 @@ func getObjectScaler(obj *object, batchSize int) (*Multiscaler, error) {
 		scalers[scaleIndex] = scaler
 	}
 
-	return NewMultiscaler(obj.index.dataType, batchSize, scalers)
+	return NewMultiscaler(dataType, bufferSize, scalers)
 }
 
 func getNumScalings(properties Properties) int {

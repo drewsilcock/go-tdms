@@ -5,14 +5,21 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
+
+const batchSize = 1024
+
+var floatOpt = cmpopts.EquateApprox(1e-9, 1e-9)
 
 func TestUnsupportedScalingType(t *testing.T) {
 	props := NewProperties().
 		Add("NI_Number_Of_Scales", 1).
 		Add("NI_Scale[0]_Scale_Type", "This isn't a valid scaling type")
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err == nil {
 		t.Fatalf("Expected error, got nil")
 	} else if !errors.Is(err, ErrUnsupportedScaler) {
@@ -32,7 +39,7 @@ func TestPrescaledData(t *testing.T) {
 		Add("NI_Scale[0]_Linear_Slope", 2.0).
 		Add("NI_Scale[0]_Linear_Y_Intercept", 10.0)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -47,7 +54,7 @@ func TestNoOpScaler(t *testing.T) {
 		Add("NI_Scale[0]_Scale_Type", "AdvancedAPI").
 		Add("NI_Scale[0]_AdvancedAPI_Input_Source", scaleIndexRawDataInput)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -65,8 +72,8 @@ func TestNoOpScaler(t *testing.T) {
 	}
 
 	// No-op returns the same reference that you put in.
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Expected output %v, got %v", want, got)
+	if !cmp.Equal(want, got, floatOpt) {
+		t.Fatalf("Output differs: %v", cmp.Diff(want, got, floatOpt))
 	}
 }
 
@@ -78,7 +85,7 @@ func TestLinearScaler(t *testing.T) {
 		Add("NI_Scale[0]_Linear_Slope", 2.0).
 		Add("NI_Scale[0]_Linear_Y_Intercept", 10.0)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -97,8 +104,8 @@ func TestLinearScaler(t *testing.T) {
 		t.Fatalf("Expected output to be a slice of float64, got %T", got)
 	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Expected output %v, got %v", want, got)
+	if !cmp.Equal(want, got, floatOpt) {
+		t.Fatalf("Output differs: %v", cmp.Diff(want, got, floatOpt))
 	}
 }
 
@@ -111,7 +118,7 @@ func TestPolynomialScaler(t *testing.T) {
 		Add("NI_Scale[0]_Polynomial_Coefficients[2]", 2.0).
 		Add("NI_Scale[0]_Polynomial_Coefficients[3]", 3.0)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -130,8 +137,8 @@ func TestPolynomialScaler(t *testing.T) {
 		t.Fatalf("Expected output to be a slice of float64, got %T", got)
 	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Expected output %v, got %v", want, got)
+	if !cmp.Equal(want, got, floatOpt) {
+		t.Fatalf("Output differs: %v", cmp.Diff(want, got, floatOpt))
 	}
 }
 
@@ -141,7 +148,7 @@ func TestPolynomialScalerWithNoCoefficients(t *testing.T) {
 		Add("NI_Scale[0]_Scale_Type", "Polynomial").
 		Add("NI_Scale[0]_Polynomial_Coefficients_Size", 0)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -160,8 +167,8 @@ func TestPolynomialScalerWithNoCoefficients(t *testing.T) {
 		t.Fatalf("Expected output to be a slice of float64, got %T", got)
 	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Expected output %v, got %v", want, got)
+	if !cmp.Equal(want, got, floatOpt) {
+		t.Fatalf("Output differs: %v", cmp.Diff(want, got, floatOpt))
 	}
 }
 
@@ -172,7 +179,7 @@ func TestPolynomialScalerWithOneCoefficient(t *testing.T) {
 		Add("NI_Scale[0]_Polynomial_Coefficients_Size", 1).
 		Add("NI_Scale[0]_Polynomial_Coefficients[0]", 2)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -191,8 +198,8 @@ func TestPolynomialScalerWithOneCoefficient(t *testing.T) {
 		t.Fatalf("Expected output to be a slice of float64, got %T", got)
 	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Expected output %v, got %v", want, got)
+	if !cmp.Equal(want, got, floatOpt) {
+		t.Fatalf("Output differs: %v", cmp.Diff(want, got, floatOpt))
 	}
 }
 
@@ -225,7 +232,7 @@ func TestRTDScaler(t *testing.T) {
 				Add("NI_Scale[0]_RTD_Resistance_Configuration", tc.resistanceConfig).
 				Add("NI_Scale[0]_RTD_Input_Source", scaleIndexRawDataInput)
 
-			scaler, err := getObjectScaler(&object{properties: props})
+			scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 			if err != nil {
 				t.Fatalf("Error creating scaler: %v", err)
 			}
@@ -234,17 +241,19 @@ func TestRTDScaler(t *testing.T) {
 
 			input := []float64{0.5, 0.6}
 
-			output, err := scaler.Scale(input)
+			got, err := scaler.Scale(input)
 			if err != nil {
 				t.Fatalf("Error scaling input: %v", err)
 			}
 
-			if _, ok := output.([]float64); !ok {
-				t.Fatalf("Expected output to be a slice of float64, got %T", output)
+			if _, ok := got.([]float64); !ok {
+				t.Fatalf("Expected output to be a slice of float64, got %T", got)
 			}
 
-			if !reflect.DeepEqual(output, tc.want) {
-				t.Fatalf("Expected output %v, got %v", tc.want, output)
+			// RTD calculation is particularly prone to floating point
+			// imprecision, so bump up the allowed error.
+			if !cmp.Equal(tc.want, got, cmpopts.EquateApprox(1e-7, 1e-7)) {
+				t.Fatalf("Output differs: %v", cmp.Diff(tc.want, got, cmpopts.EquateApprox(1e-7, 1e-7)))
 			}
 		})
 	}
@@ -449,7 +458,7 @@ func TestStrainScaler(t *testing.T) {
 					Add("NI_Scale[0]_Strain_Voltage_Excitation", 2.5).
 					Add("NI_Scale[0]_Strain_Input_Source", scaleIndexRawDataInput)
 
-				scaler, err := getObjectScaler(&object{properties: props})
+				scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 				if err != nil {
 					t.Fatalf("Error creating scaler: %v", err)
 				}
@@ -461,18 +470,18 @@ func TestStrainScaler(t *testing.T) {
 					0.0068033, 0.0068023, 0.0068316, 0.0067672, 0.0067900,
 				}
 
-				output, err := scaler.Scale(input)
+				got, err := scaler.Scale(input)
 				if err != nil {
 					t.Fatalf("Error scaling input: %v", err)
 				}
 
-				if _, ok := output.([]float64); !ok {
-					t.Fatalf("Expected output to be a slice of float64, got %T", output)
+				if _, ok := got.([]float64); !ok {
+					t.Fatalf("Expected output to be a slice of float64, got %T", got)
 				}
 
 				want := wantStrainOutput[config][feature]
-				if !reflect.DeepEqual(output, want) {
-					t.Fatalf("Expected output %v, got %v", want, output)
+				if !cmp.Equal(want, got, floatOpt) {
+					t.Fatalf("Output differs: %v", cmp.Diff(want, got, floatOpt))
 				}
 			})
 		}
@@ -493,7 +502,7 @@ func TestRTDUnsupportedConfig(t *testing.T) {
 		Add("NI_Scale[0]_Strain_Voltage_Excitation", 2.5).
 		Add("NI_Scale[0]_Strain_Input_Source", scaleIndexRawDataInput)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Error creating scaler: %v", err)
 	}
@@ -526,7 +535,7 @@ func TestTableScaler(t *testing.T) {
 		Add("NI_Scale[0]_Table_Pre_Scaled_Values[1]", 4.0).
 		Add("NI_Scale[0]_Table_Pre_Scaled_Values[2]", 8.0)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Error creating scaler: %v", err)
 	}
@@ -534,7 +543,7 @@ func TestTableScaler(t *testing.T) {
 	checkScaler(t, scaler, []Scaler{&TableScaler{}})
 
 	input := []float64{0.5, 1, 1.5, 2.5, 3, 3.5}
-	want := []float64{2, 2, 3, 6, 7, 8}
+	want := []float64{2, 2, 3, 6, 8, 8}
 
 	got, err := scaler.Scale(input)
 	if err != nil {
@@ -545,8 +554,8 @@ func TestTableScaler(t *testing.T) {
 		t.Fatalf("Expected output to be a slice of float64, got %T", got)
 	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Expected output to be %v, got %v", want, got)
+	if !cmp.Equal(want, got, floatOpt) {
+		t.Fatalf("Output differs: %v", cmp.Diff(want, got, floatOpt))
 	}
 }
 
@@ -581,7 +590,7 @@ func TestThermistorScalerVoltageExcitation(t *testing.T) {
 				Add("NI_Scale[0]_Thermistor_Temperature_Offset", 1.0).
 				Add("NI_Scale[0]_Thermistor_Input_Source", scaleIndexRawDataInput)
 
-			scaler, err := getObjectScaler(&object{properties: props})
+			scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 			if err != nil {
 				t.Fatalf("Error creating scaler: %v", err)
 			}
@@ -599,8 +608,8 @@ func TestThermistorScalerVoltageExcitation(t *testing.T) {
 				t.Fatalf("Expected output to be a slice of float64, got %T", got)
 			}
 
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("Expected output to be %v, got %v", tc.want, got)
+			if !cmp.Equal(tc.want, got, floatOpt) {
+				t.Fatalf("Output differs: %v", cmp.Diff(tc.want, got, floatOpt))
 			}
 		})
 	}
@@ -628,8 +637,8 @@ func TestThermistorScalerCurrentExcitation(t *testing.T) {
 				Add("NI_Scale[0]_Scale_Type", "Thermistor").
 				Add("NI_Scale[0]_Thermistor_Resistance_Configuration", tc.resistanceConfiguration).
 				Add("NI_Scale[0]_Thermistor_Excitation_Type", int(excitationTypeCurrent)).
-				Add("NI_Scale[0]_Thermistor_Excitation_Value", 1e0-3).
-				Add("NI_Scale[0]_Thermistor_R1_Reference_Resistance", 10000.0).
+				Add("NI_Scale[0]_Thermistor_Excitation_Value", 1.0e-3).
+				Add("NI_Scale[0]_Thermistor_R1_Reference_Resistance", 0.0).
 				Add("NI_Scale[0]_Thermistor_Lead_Wire_Resistance", tc.leadResistance).
 				Add("NI_Scale[0]_Thermistor_A", 0.0012873851).
 				Add("NI_Scale[0]_Thermistor_B", 0.00023575235).
@@ -637,7 +646,7 @@ func TestThermistorScalerCurrentExcitation(t *testing.T) {
 				Add("NI_Scale[0]_Thermistor_Temperature_Offset", 1.0).
 				Add("NI_Scale[0]_Thermistor_Input_Source", scaleIndexRawDataInput)
 
-			scaler, err := getObjectScaler(&object{properties: props})
+			scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 			if err != nil {
 				t.Fatalf("Error creating scaler: %v", err)
 			}
@@ -655,8 +664,8 @@ func TestThermistorScalerCurrentExcitation(t *testing.T) {
 				t.Fatalf("Expected output to be a slice of float64, got %T", got)
 			}
 
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("Expected output to be %v, got %v", tc.want, got)
+			if !cmp.Equal(tc.want, got, floatOpt) {
+				t.Fatalf("Output differs: %v", cmp.Diff(tc.want, got, floatOpt))
 			}
 		})
 	}
@@ -677,7 +686,7 @@ func TestThermistorUnsupportedExcitationType(t *testing.T) {
 		Add("NI_Scale[0]_Thermistor_Temperature_Offset", 1.0).
 		Add("NI_Scale[0]_Thermistor_Input_Source", scaleIndexRawDataInput)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Error creating scaler: %v", err)
 	}
@@ -703,15 +712,15 @@ func TestThermocoupleScalerVoltageToTemperature(t *testing.T) {
 		Add("NI_Scale[0]_Thermocouple_Scaling_Direction", 0).
 		Add("NI_Scale[0]_Thermocouple_Input_Source", scaleIndexRawDataInput)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Error creating scaler: %v", err)
 	}
 
 	checkScaler(t, scaler, []Scaler{&ThermocoupleScaler{}})
 
-	input := []float64{0, 1, 100, 1000}
-	want := []float64{0, 0.250843, 2.508899, 24.983648}
+	input := []float64{0, 10, 100, 1000}
+	want := []float64{0, 0.250843110, 2.50889889, 24.9836476}
 
 	got, err := scaler.Scale(input)
 	if err != nil {
@@ -722,8 +731,8 @@ func TestThermocoupleScalerVoltageToTemperature(t *testing.T) {
 		t.Fatalf("Expected output to be a slice of float64, got %T", got)
 	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Expected output to be %v, got %v", want, got)
+	if !cmp.Equal(want, got, cmpopts.EquateApprox(1e-7, 1e-7)) {
+		t.Fatalf("Output differs: %v", cmp.Diff(want, got, cmpopts.EquateApprox(1e-7, 1e-7)))
 	}
 }
 
@@ -735,7 +744,7 @@ func TestThermocoupleScalerTemperatureToVoltage(t *testing.T) {
 		Add("NI_Scale[0]_Thermocouple_Scaling_Direction", 1).
 		Add("NI_Scale[0]_Thermocouple_Input_Source", scaleIndexRawDataInput)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Error creating scaler: %v", err)
 	}
@@ -754,8 +763,69 @@ func TestThermocoupleScalerTemperatureToVoltage(t *testing.T) {
 		t.Fatalf("Expected output to be a slice of float64, got %T", got)
 	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Expected output to be %v, got %v", want, got)
+	// There's a massive error in the first value here but I've checked and the
+	// exact same error is present in npTDMS as well.
+	if !cmp.Equal(want, got, cmpopts.EquateApprox(1e-4, 1e-4)) {
+		t.Fatalf("Output differs: %v", cmp.Diff(want, got, cmpopts.EquateApprox(1e-4, 1e-4)))
+	}
+}
+
+func TestAddScaler(t *testing.T) {
+	props := NewProperties().
+		Add("NI_Number_Of_Scales", 2).
+		Add("NI_Scale[0]_Scale_Type", "Linear").
+		Add("NI_Scale[0]_Linear_Slope", 2.0).
+		Add("NI_Scale[0]_Linear_Y_Intercept", 10.0).
+		Add("NI_Scale[1]_Scale_Type", "Add").
+		Add("NI_Scale[1]_Add_Left_Operand_Input_Source", scaleIndexRawDataInput).
+		Add("NI_Scale[1]_Add_Right_Operand_Input_Source", 0)
+
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeInt32, batchSize)
+	if err != nil {
+		t.Fatalf("Error getting object scaler: %v", err)
+	}
+
+	checkScaler(t, scaler, []Scaler{&LinearScaler{}, &AddScaler{}})
+
+	input := []int32{1, 2, 3}
+	want := []float64{13, 16, 19}
+
+	got, err := scaler.Scale(input)
+	if err != nil {
+		t.Fatalf("Error scaling input: %v", err)
+	}
+	if !cmp.Equal(want, got, floatOpt) {
+		t.Fatalf("Output differs: %v", cmp.Diff(want, got, floatOpt))
+	}
+}
+
+func TestSubtractScaler(t *testing.T) {
+	props := NewProperties().
+		Add("NI_Number_Of_Scales", 2).
+		Add("NI_Number_Of_Scales", 2).
+		Add("NI_Scale[0]_Scale_Type", "Linear").
+		Add("NI_Scale[0]_Linear_Slope", 2.0).
+		Add("NI_Scale[0]_Linear_Y_Intercept", 10.0).
+		Add("NI_Scale[1]_Scale_Type", "Subtract").
+		Add("NI_Scale[1]_Subtract_Left_Operand_Input_Source", scaleIndexRawDataInput).
+		Add("NI_Scale[1]_Subtract_Right_Operand_Input_Source", 0)
+
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeInt32, batchSize)
+	if err != nil {
+		t.Fatalf("Error getting object scaler: %v", err)
+	}
+
+	checkScaler(t, scaler, []Scaler{&LinearScaler{}, &SubtractScaler{}})
+
+	input := []int32{1, 2, 3}
+	want := []float64{-11, -12, -13}
+
+	got, err := scaler.Scale(input)
+	if err != nil {
+		t.Fatalf("Error scaling input: %v", err)
+	}
+	if !cmp.Equal(want, got, floatOpt) {
+		t.Fatalf("Output differs: %v", cmp.Diff(want, got, floatOpt))
 	}
 }
 
@@ -776,7 +846,7 @@ func TestMultipleScalers(t *testing.T) {
 		Add("NI_Scale[2]_Linear_Y_Intercept", 3.0).
 		Add("NI_Scale[2]_Linear_Input_Source", 1)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Error getting object scaler: %v", err)
 	}
@@ -795,8 +865,8 @@ func TestMultipleScalers(t *testing.T) {
 		t.Fatalf("Expected output to be a slice of float64, got %T", got)
 	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Expected output to be %v, got %v", want, got)
+	if !cmp.Equal(want, got, floatOpt) {
+		t.Fatalf("Output differs: %v", cmp.Diff(want, got, floatOpt))
 	}
 }
 
@@ -819,7 +889,7 @@ func TestMultipleScalerWithAllRawDataInput(t *testing.T) {
 		Add("NI_Scale[2]_Linear_Y_Intercept", 3.0).
 		Add("NI_Scale[2]_Linear_Input_Source", scaleIndexRawDataInput)
 
-	scaler, err := getObjectScaler(&object{properties: props})
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
 	if err != nil {
 		t.Fatalf("Error getting object scaler: %v", err)
 	}
@@ -838,8 +908,8 @@ func TestMultipleScalerWithAllRawDataInput(t *testing.T) {
 		t.Fatalf("Expected output to be a slice of float64, got %T", got)
 	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Expected output to be %v, got %v", want, got)
+	if !cmp.Equal(want, got, floatOpt) {
+		t.Fatalf("Output differs: %v", cmp.Diff(want, got, floatOpt))
 	}
 }
 

@@ -670,7 +670,7 @@ func testChannelProperties(t *testing.T, f *tdms.File, tc TestCase) {
 // =============================================================================
 
 func testInt8Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataInt8All()
+	data, err := ch.ReadInt8All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read int8 data: %v", expected.Group, expected.Channel, err)
 		return
@@ -692,7 +692,7 @@ func testInt8Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testInt16Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataInt16All()
+	data, err := ch.ReadInt16All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read int16 data: %v", expected.Group, expected.Channel, err)
 		return
@@ -714,7 +714,7 @@ func testInt16Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testInt32Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataInt32All()
+	data, err := ch.ReadInt32All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read int32 data: %v", expected.Group, expected.Channel, err)
 		return
@@ -736,7 +736,7 @@ func testInt32Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testInt64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataInt64All()
+	data, err := ch.ReadInt64All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read int64 data: %v", expected.Group, expected.Channel, err)
 		return
@@ -758,7 +758,7 @@ func testInt64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testUint8Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataUint8All()
+	data, err := ch.ReadUint8All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read uint8 data: %v", expected.Group, expected.Channel, err)
 		return
@@ -780,7 +780,7 @@ func testUint8Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testUint16Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataUint16All()
+	data, err := ch.ReadUint16All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read uint16 data: %v", expected.Group, expected.Channel, err)
 		return
@@ -802,7 +802,7 @@ func testUint16Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testUint32Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataUint32All()
+	data, err := ch.ReadUint32All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read uint32 data: %v", expected.Group, expected.Channel, err)
 		return
@@ -824,7 +824,7 @@ func testUint32Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testUint64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataUint64All()
+	data, err := ch.ReadUint64All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read uint64 data: %v", expected.Group, expected.Channel, err)
 		return
@@ -865,7 +865,7 @@ func testUint64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testFloat32Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataFloat32All()
+	data, err := ch.ReadFloat32All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read float32 data: %v", expected.Group, expected.Channel, err)
 		return
@@ -887,7 +887,7 @@ func testFloat32Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testFloat64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataFloat64All()
+	data, err := ch.ReadFloat64All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read float64 data: %v", expected.Group, expected.Channel, err)
 		return
@@ -909,7 +909,7 @@ func testFloat64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testStringData(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataStringAll()
+	data, err := ch.ReadStringAll()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read string data: %v", expected.Group, expected.Channel, err)
 		return
@@ -931,7 +931,7 @@ func testStringData(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testBoolData(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataBoolAll()
+	data, err := ch.ReadBoolAll()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read bool data: %v", expected.Group, expected.Channel, err)
 		return
@@ -953,7 +953,7 @@ func testBoolData(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testComplex64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataComplex64All()
+	data, err := ch.ReadComplex64All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read complex64 data: %v", expected.Group, expected.Channel, err)
 		return
@@ -978,7 +978,7 @@ func testComplex64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
 }
 
 func testComplex128Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataComplex128All()
+	data, err := ch.ReadComplex128All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read complex128 data: %v", expected.Group, expected.Channel, err)
 		return
@@ -1005,7 +1005,7 @@ func testChannelStatistics(t *testing.T, ch *tdms.Channel, expected ChannelInfo)
 		return
 	}
 
-	data, err := ch.ReadDataFloat64All()
+	data, err := ch.ReadFloat64All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read data for statistics: %v",
 			expected.Group, expected.Channel, err)
@@ -1209,7 +1209,7 @@ func TestMultipleSegments(t *testing.T) {
 				// Read all data and verify length matches expected
 				switch expectedCh.DataType {
 				case "int32":
-					data, err := ch.ReadDataInt32All()
+					data, err := ch.ReadInt32All()
 					if err != nil {
 						t.Errorf("Failed to read data: %v", err)
 						continue
@@ -1329,7 +1329,7 @@ func TestEmptyChannels(t *testing.T) {
 				}
 
 				// Verify empty channel returns empty data
-				data, err := ch.ReadDataFloat64All()
+				data, err := ch.ReadFloat64All()
 				if err != nil {
 					t.Errorf("Failed to read empty channel: %v", err)
 					continue

@@ -44,3 +44,81 @@ func allocateBuffer(dataType DataType, size int) (any, error) {
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedType, dataType)
 	}
 }
+
+func bufferLen(buffer any) int {
+	switch v := buffer.(type) {
+	case []int8:
+		return len(v)
+	case []int16:
+		return len(v)
+	case []int32:
+		return len(v)
+	case []int64:
+		return len(v)
+	case []uint8:
+		return len(v)
+	case []uint16:
+		return len(v)
+	case []uint32:
+		return len(v)
+	case []uint64:
+		return len(v)
+	case []float32:
+		return len(v)
+	case []float64:
+		return len(v)
+	case []Float128:
+		return len(v)
+	case []string:
+		return len(v)
+	case []bool:
+		return len(v)
+	case []Timestamp:
+		return len(v)
+	case []complex64:
+		return len(v)
+	case []complex128:
+		return len(v)
+	default:
+		return 0
+	}
+}
+
+func sliceBuffer(buffer any, from, to int) any {
+	switch v := buffer.(type) {
+	case []int8:
+		return v[from:to]
+	case []int16:
+		return v[from:to]
+	case []int32:
+		return v[from:to]
+	case []int64:
+		return v[from:to]
+	case []uint8:
+		return v[from:to]
+	case []uint16:
+		return v[from:to]
+	case []uint32:
+		return v[from:to]
+	case []uint64:
+		return v[from:to]
+	case []float32:
+		return v[from:to]
+	case []float64:
+		return v[from:to]
+	case []Float128:
+		return v[from:to]
+	case []string:
+		return v[from:to]
+	case []bool:
+		return v[from:to]
+	case []Timestamp:
+		return v[from:to]
+	case []complex64:
+		return v[from:to]
+	case []complex128:
+		return v[from:to]
+	default:
+		return nil
+	}
+}
