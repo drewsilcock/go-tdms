@@ -238,6 +238,7 @@ func (t *File) readMetadata() error {
 				path:           obj.path,
 				dataChunks:     chunks,
 				totalNumValues: totalNumValues,
+				file:           t,
 			}
 		}
 	}

@@ -26,6 +26,7 @@ type Channel struct {
 	path           string
 	dataChunks     []dataChunk
 	totalNumValues uint64
+	file           *File
 }
 
 // dataChunk is similar to objectIndex, but is a single object index can
@@ -55,7 +56,8 @@ func (ch *Channel) NumValues() uint64 {
 }
 
 type readOptions struct {
-	batchSize int
+	batchSize   int
+	shouldScale bool
 }
 
 // ReadOption configures how data is read from a [Channel].
@@ -69,108 +71,124 @@ func BatchSize(batchSize int) ReadOption {
 	}
 }
 
+// WithScaling sets whether data should be scaled during streaming.
+//
+// Note that WithScaling() is equivalent to WithScaling(true).
+//
+// If [WithScaling] is not specified as an option, streaming will default to
+// applying scaling.
+func WithScaling(shouldScale ...bool) ReadOption {
+	return func(opts *readOptions) {
+		if len(shouldScale) > 0 {
+			opts.shouldScale = shouldScale[0]
+		} else {
+			opts.shouldScale = true
+		}
+	}
+}
+
 // Data streaming functions that yield each item at a time.
 
 // ReadDataAsInt8 returns an iterator that yields individual int8 values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsInt8(options ...ReadOption) iter.Seq2[int8, error] {
-	return StreamReader(ch, options, DataTypeInt8, interpretInt8)
+	return StreamReader(ch, options, interpretInt8)
 }
 
 // ReadDataAsInt16 returns an iterator that yields individual int16 values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsInt16(options ...ReadOption) iter.Seq2[int16, error] {
-	return StreamReader(ch, options, DataTypeInt16, interpretInt16)
+	return StreamReader(ch, options, interpretInt16)
 }
 
 // ReadDataAsInt32 returns an iterator that yields individual int32 values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsInt32(options ...ReadOption) iter.Seq2[int32, error] {
-	return StreamReader(ch, options, DataTypeInt32, interpretInt32)
+	return StreamReader(ch, options, interpretInt32)
 }
 
 // ReadDataAsInt64 returns an iterator that yields individual int64 values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsInt64(options ...ReadOption) iter.Seq2[int64, error] {
-	return StreamReader(ch, options, DataTypeInt64, interpretInt64)
+	return StreamReader(ch, options, interpretInt64)
 }
 
 // ReadDataAsUint8 returns an iterator that yields individual uint8 values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsUint8(options ...ReadOption) iter.Seq2[uint8, error] {
-	return StreamReader(ch, options, DataTypeUint8, interpretUint8)
+	return StreamReader(ch, options, interpretUint8)
 }
 
 // ReadDataAsUint16 returns an iterator that yields individual uint16 values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsUint16(options ...ReadOption) iter.Seq2[uint16, error] {
-	return StreamReader(ch, options, DataTypeUint16, interpretUint16)
+	return StreamReader(ch, options, interpretUint16)
 }
 
 // ReadDataAsUint32 returns an iterator that yields individual uint32 values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsUint32(options ...ReadOption) iter.Seq2[uint32, error] {
-	return StreamReader(ch, options, DataTypeUint32, interpretUint32)
+	return StreamReader(ch, options, interpretUint32)
 }
 
 // ReadDataAsUint64 returns an iterator that yields individual uint64 values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsUint64(options ...ReadOption) iter.Seq2[uint64, error] {
-	return StreamReader(ch, options, DataTypeUint64, interpretUint64)
+	return StreamReader(ch, options, interpretUint64)
 }
 
 // ReadDataAsFloat32 returns an iterator that yields individual float32 values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsFloat32(options ...ReadOption) iter.Seq2[float32, error] {
-	return StreamReader(ch, options, DataTypeFloat32, interpretFloat32)
+	return StreamReader(ch, options, interpretFloat32)
 }
 
 // ReadDataAsFloat64 returns an iterator that yields individual float64 values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsFloat64(options ...ReadOption) iter.Seq2[float64, error] {
-	return StreamReader(ch, options, DataTypeFloat64, interpretFloat64)
+	return StreamReader(ch, options, interpretFloat64)
 }
 
 // ReadDataAsFloat128 returns an iterator that yields individual [Float128] values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsFloat128(options ...ReadOption) iter.Seq2[Float128, error] {
-	return StreamReader(ch, options, DataTypeFloat128, interpretFloat128)
+	return StreamReader(ch, options, interpretFloat128)
 }
 
 // ReadDataAsString returns an iterator that yields individual string values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsString(options ...ReadOption) iter.Seq2[string, error] {
-	return StreamReader(ch, options, DataTypeString, interpretString)
+	return StreamReader(ch, options, interpretString)
 }
 
 // ReadDataAsBool returns an iterator that yields individual bool values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsBool(options ...ReadOption) iter.Seq2[bool, error] {
-	return StreamReader(ch, options, DataTypeBool, interpretBool)
+	return StreamReader(ch, options, interpretBool)
 }
 
 // ReadDataAsTimestamp returns an iterator that yields individual [Timestamp] values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsTimestamp(options ...ReadOption) iter.Seq2[Timestamp, error] {
-	return StreamReader(ch, options, DataTypeTimestamp, interpretTimestamp)
+	return StreamReader(ch, options, interpretTimestamp)
 }
 
 // ReadDataAsTime returns an iterator that yields individual [time.Time] values from the channel.
 // Timestamps are automatically converted from TDMS format. Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsTime(options ...ReadOption) iter.Seq2[time.Time, error] {
-	return StreamReader(ch, options, DataTypeTimestamp, interpretTime)
+	return StreamReader(ch, options, interpretTime)
 }
 
 // ReadDataAsComplex64 returns an iterator that yields individual complex64 values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsComplex64(options ...ReadOption) iter.Seq2[complex64, error] {
-	return StreamReader(ch, options, DataTypeComplex64, interpretComplex64)
+	return StreamReader(ch, options, interpretComplex64)
 }
 
 // ReadDataAsComplex128 returns an iterator that yields individual complex128 values from the channel.
 // Use BatchSize option to control internal buffer size.
 func (ch *Channel) ReadDataAsComplex128(options ...ReadOption) iter.Seq2[complex128, error] {
-	return StreamReader(ch, options, DataTypeComplex128, interpretComplex128)
+	return StreamReader(ch, options, interpretComplex128)
 }
 
 // Data streaming functions that yield items in batches.

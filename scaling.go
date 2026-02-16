@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"reflect"
+	"math/big"
 	"regexp"
 	"slices"
 	"strings"
@@ -47,6 +47,10 @@ type Numeric interface {
 	~int8 | ~int16 | ~int32 | ~int64 |
 		~uint8 | ~uint16 | ~uint32 | ~uint64 |
 		~float32 | ~float64
+}
+
+type NumericOrComplex interface {
+	Numeric | complex64 | complex128
 }
 
 type excitationType int
@@ -105,6 +109,14 @@ var scaleTypeRegex = regexp.MustCompile(`^NI_Scale\[(\d+)\]_Scale_Type$`)
 type Scaler interface {
 	ReadProperties(props Properties, scaleIndex int) error
 
+	InputSources() []int
+
+	// OutputType returns the TDS type output by this scaler, given input type.
+	//
+	// Most scalers return float64 but some maintain the input type and
+	// add/subtract apply type promotion to get the output type.\
+	OutputType(inputTypes []DataType) (DataType, error)
+
 	// Scale applies scaling as defined by the individual scalers and its param
 	// in-line to the input values.
 	//
@@ -119,7 +131,7 @@ type Scaler interface {
 	//
 	// Invoking this function with anything other than a slice as input is
 	// invalid and will result in a panic.
-	Scale(any, ...any) (any, error)
+	Scale(inputs []any, output any) error
 }
 
 type baseScaler struct {
@@ -129,6 +141,10 @@ type baseScaler struct {
 	// scaler that takes raw data as input, then passing the data back up the
 	// chain.
 	inputSource int
+}
+
+func (s *baseScaler) InputSources() []int {
+	return []int{s.inputSource}
 }
 
 func (s *baseScaler) ReadProperties(props Properties, scaleIndex int, scaleName string) error {
@@ -156,8 +172,49 @@ func (s *NoOpScaler) ReadProperties(props Properties, scaleIndex int) error {
 	return s.baseScaler.ReadProperties(props, scaleIndex, s.name)
 }
 
-func (s *NoOpScaler) Scale(input any, _otherInputs ...any) (any, error) {
-	return input, nil
+func (s *NoOpScaler) OutputType(inputTypes []DataType) (DataType, error) {
+	return inputTypes[0], nil
+}
+
+func (s *NoOpScaler) Scale(inputs []any, output any) error {
+	// Just copy from input to output.
+
+	switch v := inputs[0].(type) {
+	case []int8:
+		copy(output.([]int8), v)
+	case []int16:
+		copy(output.([]int16), v)
+	case []int32:
+		copy(output.([]int32), v)
+	case []int64:
+		copy(output.([]int64), v)
+	case []uint8:
+		copy(output.([]uint8), v)
+	case []uint16:
+		copy(output.([]uint16), v)
+	case []uint32:
+		copy(output.([]uint32), v)
+	case []uint64:
+		copy(output.([]uint64), v)
+	case []float32:
+		copy(output.([]float32), v)
+	case []float64:
+		copy(output.([]float64), v)
+	case []Float128:
+		copy(output.([]Float128), v)
+	case []complex64:
+		copy(output.([]complex64), v)
+	case []complex128:
+		copy(output.([]complex128), v)
+	case []bool:
+		copy(output.([]bool), v)
+	case []string:
+		copy(output.([]string), v)
+	case []Timestamp:
+		copy(output.([]Timestamp), v)
+	}
+
+	return nil
 }
 
 type LinearScaler struct {
@@ -188,10 +245,14 @@ func (s *LinearScaler) ReadProperties(props Properties, scaleIndex int) error {
 	return nil
 }
 
-func (s *LinearScaler) Scale(values any, _otherInputs ...any) (any, error) {
-	out := make([]float64, reflect.ValueOf(values).Len())
+func (s *LinearScaler) OutputType(inputTypes []DataType) (DataType, error) {
+	return DataTypeFloat64, nil
+}
 
-	switch v := values.(type) {
+func (s *LinearScaler) Scale(inputs []any, output any) error {
+	out := output.([]float64)
+
+	switch v := inputs[0].(type) {
 	case []int8:
 		linearScale(s, v, out)
 	case []int16:
@@ -213,10 +274,10 @@ func (s *LinearScaler) Scale(values any, _otherInputs ...any) (any, error) {
 	case []float64:
 		linearScale(s, v, out)
 	default:
-		return nil, fmt.Errorf("unsupported type for linear scaling: %T", v)
+		return fmt.Errorf("unsupported type for linear scaling: %T", v)
 	}
 
-	return out, nil
+	return nil
 }
 
 func linearScale[T Numeric](s *LinearScaler, values []T, out []float64) {
@@ -253,10 +314,14 @@ func (s *PolynomialScaler) ReadProperties(props Properties, scaleIndex int) erro
 	return nil
 }
 
-func (s *PolynomialScaler) Scale(values any, _otherInputs ...any) (any, error) {
-	out := make([]float64, reflect.ValueOf(values).Len())
+func (s *PolynomialScaler) OutputType(_inputTypes []DataType) (DataType, error) {
+	return DataTypeFloat64, nil
+}
 
-	switch v := values.(type) {
+func (s *PolynomialScaler) Scale(inputs []any, output any) error {
+	out := output.([]float64)
+
+	switch v := inputs[0].(type) {
 	case []int8:
 		polynomialScale(s, v, out)
 	case []int16:
@@ -278,10 +343,10 @@ func (s *PolynomialScaler) Scale(values any, _otherInputs ...any) (any, error) {
 	case []float64:
 		polynomialScale(s, v, out)
 	default:
-		return nil, fmt.Errorf("invalid input type: %T", v)
+		return fmt.Errorf("invalid input type: %T", v)
 	}
 
-	return out, nil
+	return nil
 }
 
 // Calculate c[0] + c[1]*x + c[2]*x^2 + ... + c[N-1]*x^(N-1) where c is the
@@ -358,10 +423,14 @@ func (s *RTDScaler) ReadProperties(props Properties, scaleIndex int) error {
 	return nil
 }
 
-func (s *RTDScaler) Scale(values any, _otherInputs ...any) (any, error) {
-	out := make([]float64, reflect.ValueOf(values).Len())
+func (s *RTDScaler) OutputType(_inputTypes []DataType) (DataType, error) {
+	return DataTypeFloat64, nil
+}
 
-	switch v := values.(type) {
+func (s *RTDScaler) Scale(inputs []any, output any) error {
+	out := output.([]float64)
+
+	switch v := inputs[0].(type) {
 	case []int8:
 		scaleRTD(s, v, out)
 	case []int16:
@@ -383,10 +452,10 @@ func (s *RTDScaler) Scale(values any, _otherInputs ...any) (any, error) {
 	case []float64:
 		scaleRTD(s, v, out)
 	default:
-		return nil, fmt.Errorf("unsupported type: %T", values)
+		return fmt.Errorf("unsupported type: %T", v)
 	}
 
-	return out, nil
+	return nil
 }
 
 func scaleRTD[T Numeric](s *RTDScaler, values []T, out []float64) {
@@ -516,11 +585,15 @@ func (s *StrainScaler) ReadProperties(props Properties, scaleIndex int) error {
 	return nil
 }
 
-func (s *StrainScaler) Scale(input any, _otherInputs ...any) (any, error) {
-	out := make([]float64, reflect.ValueOf(input).Len())
+func (s *StrainScaler) OutputType(_inputTypes []DataType) (DataType, error) {
+	return DataTypeFloat64, nil
+}
+
+func (s *StrainScaler) Scale(inputs []any, output any) error {
+	out := output.([]float64)
 	var err error
 
-	switch v := input.(type) {
+	switch v := inputs[0].(type) {
 	case []int8:
 		err = strainScale(s, v, out)
 	case []int16:
@@ -542,14 +615,14 @@ func (s *StrainScaler) Scale(input any, _otherInputs ...any) (any, error) {
 	case []float64:
 		err = strainScale(s, v, out)
 	default:
-		return nil, fmt.Errorf("unsupported input type: %T", v)
+		return fmt.Errorf("unsupported input type: %T", v)
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to scale input: %w", err)
+		return fmt.Errorf("failed to scale input: %w", err)
 	}
 
-	return out, nil
+	return nil
 }
 
 func strainScale[T Numeric](s *StrainScaler, values []T, out []float64) error {
@@ -717,10 +790,14 @@ func (s *TableScaler) ReadProperties(props Properties, scaleIndex int) error {
 	return nil
 }
 
-func (s *TableScaler) Scale(input any, _otherInputs ...any) (any, error) {
-	out := make([]float64, reflect.ValueOf(input).Len())
+func (s *TableScaler) OutputType(_inputTypes []DataType) (DataType, error) {
+	return DataTypeFloat64, nil
+}
 
-	switch v := input.(type) {
+func (s *TableScaler) Scale(inputs []any, output any) error {
+	out := output.([]float64)
+
+	switch v := inputs[0].(type) {
 	case []int8:
 		tableScale(s, v, out)
 	case []int16:
@@ -742,10 +819,10 @@ func (s *TableScaler) Scale(input any, _otherInputs ...any) (any, error) {
 	case []float64:
 		tableScale(s, v, out)
 	default:
-		return nil, fmt.Errorf("unsupported input type: %T", input)
+		return fmt.Errorf("unsupported input type: %T", v)
 	}
 
-	return out, nil
+	return nil
 }
 
 func tableScale[T Numeric](s *TableScaler, input []T, out []float64) {
@@ -831,11 +908,15 @@ func (s *ThermistorScaler) ReadProperties(props Properties, scaleIndex int) erro
 	return nil
 }
 
-func (s *ThermistorScaler) Scale(input any, _otherInputs ...any) (any, error) {
-	out := make([]float64, reflect.ValueOf(input).Len())
+func (s *ThermistorScaler) OutputType(_inputTypes []DataType) (DataType, error) {
+	return DataTypeFloat64, nil
+}
+
+func (s *ThermistorScaler) Scale(inputs []any, output any) error {
+	out := output.([]float64)
 	var err error
 
-	switch v := input.(type) {
+	switch v := inputs[0].(type) {
 	case []int8:
 		err = thermistorScale(s, v, out)
 	case []int16:
@@ -857,14 +938,14 @@ func (s *ThermistorScaler) Scale(input any, _otherInputs ...any) (any, error) {
 	case []float64:
 		err = thermistorScale(s, v, out)
 	default:
-		return nil, fmt.Errorf("unsupported input type: %T", input)
+		return fmt.Errorf("unsupported input type: %T", v)
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to scale input: %w", err)
+		return fmt.Errorf("failed to scale input: %w", err)
 	}
 
-	return out, nil
+	return nil
 }
 
 func thermistorScale[T Numeric](s *ThermistorScaler, input []T, out []float64) error {
@@ -946,10 +1027,14 @@ func (s *ThermocoupleScaler) ReadProperties(props Properties, scaleIndex int) er
 	return nil
 }
 
-func (s *ThermocoupleScaler) Scale(input any, _otherInputs ...any) (any, error) {
-	out := make([]float64, reflect.ValueOf(input).Len())
+func (s *ThermocoupleScaler) OutputType(_inputTypes []DataType) (DataType, error) {
+	return DataTypeFloat64, nil
+}
 
-	switch v := input.(type) {
+func (s *ThermocoupleScaler) Scale(inputs []any, output any) error {
+	out := output.([]float64)
+
+	switch v := inputs[0].(type) {
 	case []int8:
 		thermocoupleScale(s, v, out)
 	case []int16:
@@ -972,7 +1057,7 @@ func (s *ThermocoupleScaler) Scale(input any, _otherInputs ...any) (any, error) 
 		thermocoupleScale(s, v, out)
 	}
 
-	return out, nil
+	return nil
 }
 
 func thermocoupleScale[T Numeric](s *ThermocoupleScaler, input []T, out []float64) {
@@ -989,6 +1074,10 @@ func thermocoupleScale[T Numeric](s *ThermocoupleScaler, input []T, out []float6
 type AddScaler struct {
 	leftInputSource  int
 	rightInputSource int
+}
+
+func (s *AddScaler) InputSources() []int {
+	return []int{s.leftInputSource, s.rightInputSource}
 }
 
 func (s *AddScaler) ReadProperties(props Properties, scaleIndex int) error {
@@ -1009,54 +1098,26 @@ func (s *AddScaler) ReadProperties(props Properties, scaleIndex int) error {
 	return nil
 }
 
-func (s *AddScaler) Scale(input any, otherInputs ...any) (any, error) {
-	if len(otherInputs) != 1 {
-		return nil, errors.New("expected exactly one other input")
+func (s *AddScaler) OutputType(inputTypes []DataType) (DataType, error) {
+	outputType, err := getPromotedType(inputTypes[0], inputTypes[1])
+	if err != nil {
+		return DataTypeVoid, fmt.Errorf("%w: %w", ErrUnsupportedTypePromotion, err)
 	}
 
-	out := make([]any, reflect.ValueOf(input).Len())
-
-	v2 := otherInputs[0]
-
-	switch v1 := input.(type) {
-	case []int8:
-		addScale(v1, v2.([]int8), out)
-	case []int16:
-		addScale(v1, v2.([]int16), out)
-	case []int32:
-		addScale(v1, v2.([]int32), out)
-	case []int64:
-		addScale(v1, v2.([]int64), out)
-	case []uint8:
-		addScale(v1, v2.([]uint8), out)
-	case []uint16:
-		addScale(v1, v2.([]uint16), out)
-	case []uint32:
-		addScale(v1, v2.([]uint32), out)
-	case []uint64:
-		addScale(v1, v2.([]uint64), out)
-	case []float32:
-		addScale(v1, v2.([]float32), out)
-	case []float64:
-		addScale(v1, v2.([]float64), out)
-	case []complex64:
-		addScale(v1, v2.([]complex64), out)
-	case []complex128:
-		addScale(v1, v2.([]complex128), out)
-	}
-
-	return out, nil
+	return outputType, nil
 }
 
-func addScale[T Numeric | complex64 | complex128](leftValues []T, rightValues []T, out []any) {
-	for i := range leftValues {
-		out[i] = leftValues[i] + rightValues[i]
-	}
+func (s *AddScaler) Scale(inputs []any, output any) error {
+	return typePromotedAdd(inputs[0], inputs[1], output)
 }
 
 type SubtractScaler struct {
 	leftInputSource  int
 	rightInputSource int
+}
+
+func (s *SubtractScaler) InputSources() []int {
+	return []int{s.leftInputSource, s.rightInputSource}
 }
 
 func (s *SubtractScaler) ReadProperties(props Properties, scaleIndex int) error {
@@ -1077,49 +1138,17 @@ func (s *SubtractScaler) ReadProperties(props Properties, scaleIndex int) error 
 	return nil
 }
 
-func (s *SubtractScaler) Scale(input any, otherInputs ...any) (any, error) {
-	if len(otherInputs) != 1 {
-		return nil, errors.New("expected exactly one other input")
+func (s *SubtractScaler) OutputType(inputTypes []DataType) (DataType, error) {
+	outputType, err := getPromotedType(inputTypes[0], inputTypes[1])
+	if err != nil {
+		return DataTypeVoid, fmt.Errorf("%w: %w", ErrUnsupportedTypePromotion, err)
 	}
 
-	out := make([]any, reflect.ValueOf(input).Len())
-
-	v2 := otherInputs[0]
-
-	switch v1 := input.(type) {
-	case []int8:
-		subtractScale(v1, v2.([]int8), out)
-	case []int16:
-		subtractScale(v1, v2.([]int16), out)
-	case []int32:
-		subtractScale(v1, v2.([]int32), out)
-	case []int64:
-		subtractScale(v1, v2.([]int64), out)
-	case []uint8:
-		subtractScale(v1, v2.([]uint8), out)
-	case []uint16:
-		subtractScale(v1, v2.([]uint16), out)
-	case []uint32:
-		subtractScale(v1, v2.([]uint32), out)
-	case []uint64:
-		subtractScale(v1, v2.([]uint64), out)
-	case []float32:
-		subtractScale(v1, v2.([]float32), out)
-	case []float64:
-		subtractScale(v1, v2.([]float64), out)
-	case []complex64:
-		subtractScale(v1, v2.([]complex64), out)
-	case []complex128:
-		subtractScale(v1, v2.([]complex128), out)
-	}
-
-	return out, nil
+	return outputType, nil
 }
 
-func subtractScale[T Numeric | ~complex64 | ~complex128](leftValues []T, rightValues []T, out []any) {
-	for i := range leftValues {
-		out[i] = leftValues[i] - rightValues[i]
-	}
+func (s *SubtractScaler) Scale(inputs []any, output any) error {
+	return typePromotedSubtract(inputs[0], inputs[1], output)
 }
 
 // ReciprocalScaler calculates the reciprocal of the input value.
@@ -1132,99 +1161,156 @@ func (s *ReciprocalScaler) ReadProperties(props Properties, scaleIndex int) erro
 	return s.baseScaler.ReadProperties(props, scaleIndex, "Reciprocal")
 }
 
-func (s *ReciprocalScaler) Scale(input any, _otherInputs ...any) (any, error) {
-	out := make([]any, reflect.ValueOf(input).Len())
-
-	switch v := input.(type) {
-	case []int8:
-		reciprocalScaler(v, out)
-	case []int16:
-		reciprocalScaler(v, out)
-	case []int32:
-		reciprocalScaler(v, out)
-	case []int64:
-		reciprocalScaler(v, out)
-	case []uint8:
-		reciprocalScaler(v, out)
-	case []uint16:
-		reciprocalScaler(v, out)
-	case []uint32:
-		reciprocalScaler(v, out)
-	case []uint64:
-		reciprocalScaler(v, out)
-	case []float32:
-		reciprocalScaler(v, out)
-	case []float64:
-		reciprocalScaler(v, out)
-	case []complex64:
-		reciprocalScaler(v, out)
-	case []complex128:
-		reciprocalScaler(v, out)
+// OutputType returns the output type of the ReciprocalScaler.
+//
+// For the reciprocal to be at all useful, the result needs to be at least a
+// float. This is equivalent to applying the type promotion rules where the left
+// input type is our actual input type, and the right input type is float64 – if
+// it's "above" float64 (i.e. complex) to will be promoted up to that, otherwise
+// the input type gets promoted up to float64. If the input type is a bool or a
+// string or something silly, this will return an error.
+func (s *ReciprocalScaler) OutputType(inputTypes []DataType) (DataType, error) {
+	outputType, err := getPromotedType(inputTypes[0], DataTypeFloat64)
+	if err != nil {
+		return DataTypeVoid, fmt.Errorf("%w: %w", ErrUnsupportedTypePromotion, err)
 	}
 
-	return out, nil
+	return outputType, nil
 }
 
-func reciprocalScaler[T Numeric | ~complex64 | ~complex128](values []T, out []any) {
+func (s *ReciprocalScaler) Scale(inputs []any, output any) error {
+	switch v := inputs[0].(type) {
+	case []int8:
+		reciprocalFloat64(v, output.([]float64))
+	case []int16:
+		reciprocalFloat64(v, output.([]float64))
+	case []int32:
+		reciprocalFloat64(v, output.([]float64))
+	case []int64:
+		reciprocalFloat64(v, output.([]float64))
+	case []uint8:
+		reciprocalFloat64(v, output.([]float64))
+	case []uint16:
+		reciprocalFloat64(v, output.([]float64))
+	case []uint32:
+		reciprocalFloat64(v, output.([]float64))
+	case []uint64:
+		reciprocalFloat64(v, output.([]float64))
+	case []float32:
+		reciprocalFloat64(v, output.([]float64))
+	case []float64:
+		reciprocalFloat64(v, output.([]float64))
+	case []Float128:
+		out := output.([]Float128)
+		for i := range v {
+			if v[i] != NewFloat128(0) {
+				outBf := new(big.Float).Quo(big.NewFloat(1), v[i].AsBigFloat())
+				out[i] = *new(Float128).SetBigFloat(outBf)
+			}
+		}
+	case []complex64:
+		out := output.([]complex64)
+		for i := range v {
+			if v[i] != 0 {
+				out[i] = 1 / v[i]
+			}
+		}
+	case []complex128:
+		out := output.([]complex128)
+		for i := range v {
+			if v[i] != 0 {
+				out[i] = 1 / v[i]
+			}
+		}
+	default:
+		return fmt.Errorf("%w: %T", ErrUnsupportedType, inputs[0])
+	}
+
+	return nil
+}
+
+func reciprocalFloat64[T Numeric](values []T, output []float64) {
 	for i, v := range values {
 		if v != 0 {
-			out[i] = 1 / v
+			output[i] = 1 / float64(v)
 		}
 	}
 }
 
 type Multiscaler struct {
 	scalers []Scaler
+	buffers []any
+}
+
+type dualInputBuffer struct {
+	left  any
+	right any
+}
+
+func NewMultiscaler(rawDataType DataType, batchSize int, scalers []Scaler) (*Multiscaler, error) {
+	if len(scalers) == 0 {
+		return nil, errors.New("multiscaler requires at least one scaler")
+	}
+
+	// We need to create intermediate buffers for each scaler as they can all be
+	// different types. We do the reading in batches so this isn't too bad.
+	// Theoretically, we could re-use buffers to save space, but we'd need to
+	// check that the buffer wasn't being re-used later on as scaler[i] doesn't
+	// necessarily need to have scaler[i-1] as input (e.g. add, subtract
+	// scalers).
+	m := Multiscaler{
+		scalers: scalers,
+		buffers: make([]any, len(scalers)),
+	}
+
+	dataTypes := make([]DataType, len(scalers))
+	var err error
+
+	for i, scaler := range scalers {
+		outputType := DataTypeVoid
+
+		inputTypes := make([]DataType, len(scaler.InputSources()))
+		for i, inputSource := range scaler.InputSources() {
+			if inputSource == scaleIndexRawDataInput {
+				inputTypes[i] = rawDataType
+			} else {
+				inputTypes[i] = dataTypes[inputSource]
+			}
+		}
+
+		outputType, err = scaler.OutputType(inputTypes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get output type for scaler %d: %w", i, err)
+		}
+
+		m.buffers[i], err = allocateBuffer(outputType, batchSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to allocate buffer for scaler %d: %w", i, err)
+		}
+
+		dataTypes[i] = outputType
+	}
+
+	return &m, nil
 }
 
 func (m *Multiscaler) Scale(input any) (any, error) {
-	// We had to calculate scales from front to back. To do this, we start at
-	// the final scale and work back recursively.
-	finalScaleIndex := len(m.scalers) - 1
-	return m.computeScalings(input, finalScaleIndex)
-}
+	for i, scaler := range m.scalers {
+		inputs := make([]any, len(scaler.InputSources()))
+		for i, source := range scaler.InputSources() {
+			if source == scaleIndexRawDataInput {
+				inputs[i] = input
+			} else {
+				inputs[i] = m.buffers[source]
+			}
+		}
 
-func (m *Multiscaler) computeScalings(input any, scaleIndex int) (any, error) {
-	if scaleIndex == scaleIndexRawDataInput {
-		return input, nil
+		if err := scaler.Scale(inputs, m.buffers[i]); err != nil {
+			return nil, fmt.Errorf("failed to scale input: %w", err)
+		}
 	}
 
-	if scaleIndex < 0 || scaleIndex >= len(m.scalers) {
-		return nil, fmt.Errorf("invalid scale index %d", scaleIndex)
-	}
-
-	scaler := m.scalers[scaleIndex]
-
-	// Add and subtract scalers need to be handled differently because they take
-	// two input sources instead of one.
-	switch s := scaler.(type) {
-	case *AddScaler:
-		leftInput, err := m.computeScalings(input, s.leftInputSource)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scale left input: %w", err)
-		}
-
-		rightInput, err := m.computeScalings(input, s.rightInputSource)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scale right input: %w", err)
-		}
-
-		return s.Scale(leftInput, rightInput)
-	case *SubtractScaler:
-		leftInput, err := m.computeScalings(input, s.leftInputSource)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scale left input: %w", err)
-		}
-
-		rightInput, err := m.computeScalings(input, s.rightInputSource)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scale right input: %w", err)
-		}
-
-		return s.Scale(leftInput, rightInput)
-	default:
-		return s.Scale(input)
-	}
+	return m.buffers[len(m.buffers)-1], nil
 }
 
 // getChannelScaler retrieves the scaling for a specific channel.
@@ -1235,23 +1321,23 @@ func (m *Multiscaler) computeScalings(input any, scaleIndex int) (any, error) {
 // We assume that the scaling does not change between segments. According to the
 // spec, it is possible for scalings to change between segments but in practice
 // LabVIEW does not do this.
-func getChannelScaler(channel *Channel, group *Group, file *File) (*Multiscaler, error) {
-	channelObj := file.objects[channel.path]
-	if channelScaler, err := getObjectScaler(&channelObj); err != nil {
+func getChannelScaler(channel *Channel, batchSize int) (*Multiscaler, error) {
+	channelObj := channel.file.objects[channel.path]
+	if channelScaler, err := getObjectScaler(&channelObj, batchSize); err != nil {
 		return nil, err
 	} else if channelScaler != nil {
 		return channelScaler, nil
 	}
 
-	groupObj := file.objects[group.path]
-	if groupScaler, err := getObjectScaler(&groupObj); err != nil {
+	groupObj := channel.file.objects[channel.file.Groups[channel.GroupName].path]
+	if groupScaler, err := getObjectScaler(&groupObj, batchSize); err != nil {
 		return nil, err
 	} else if groupScaler != nil {
 		return groupScaler, nil
 	}
 
-	fileObj := file.objects[""]
-	if fileScaler, err := getObjectScaler(&fileObj); err != nil {
+	fileObj := channel.file.objects[""]
+	if fileScaler, err := getObjectScaler(&fileObj, batchSize); err != nil {
 		return nil, err
 	} else if fileScaler != nil {
 		return fileScaler, nil
@@ -1264,7 +1350,7 @@ func getChannelScaler(channel *Channel, group *Group, file *File) (*Multiscaler,
 // scaling to a whole group or file which then applies to all channels inside
 // that group/file, you should use [getScaling] instead to retrieve the scaling
 // for actual use.
-func getObjectScaler(obj *object) (*Multiscaler, error) {
+func getObjectScaler(obj *object, batchSize int) (*Multiscaler, error) {
 	scalingType, err := obj.properties.GetString("NI_Scaling_Status", "unscaled")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get scaling type: %w", err)
@@ -1356,7 +1442,7 @@ func getObjectScaler(obj *object) (*Multiscaler, error) {
 		scalers[scaleIndex] = scaler
 	}
 
-	return &Multiscaler{scalers: scalers}, nil
+	return NewMultiscaler(obj.index.dataType, batchSize, scalers)
 }
 
 func getNumScalings(properties Properties) int {

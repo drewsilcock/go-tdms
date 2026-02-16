@@ -26,26 +26,94 @@ type interpreter[T any] func([]byte, binary.ByteOrder) T
 // to yield one value at a time. Use the [BatchSize] option to control the
 // internal buffer size. This is the most convenient way to iterate over channel
 // data when you need to process values individually.
-func StreamReader[T any](
-	ch *Channel,
-	options []ReadOption,
-	dataType DataType,
-	interpret interpreter[T],
-) iter.Seq2[T, error] {
-	return func(yield func(T, error) bool) {
-		for batch, err := range BatchStreamReader(ch, options, dataType, interpret) {
+func StreamReader[T any](ch *Channel, options []ReadOption, interpret interpreter[T]) iter.Seq2[any, error] {
+	return func(yield func(any, error) bool) {
+		for batch, err := range BatchStreamReader(ch, options, interpret) {
 			if err != nil {
-				yield(*new(T), err)
+				yield(nil, err)
 				return
 			}
 
-			for _, datum := range batch {
-				if !yield(datum, nil) {
+			// This would be a lot shorter using reflect.ValueOf(), but it's a
+			// relatively hot path so I'm avoiding reflection with a type
+			// switch. If you think this is bad, you should see the type
+			// promotion code.
+			switch v := batch.(type) {
+			case []int8:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []int16:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []int32:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []int64:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []uint8:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []uint16:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []uint32:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []uint64:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []float32:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []float64:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []Float128:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []string:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []bool:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []Timestamp:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []complex64:
+				if !yieldSlice(v, yield) {
+					return
+				}
+			case []complex128:
+				if !yieldSlice(v, yield) {
 					return
 				}
 			}
 		}
 	}
+}
+
+func yieldSlice[T any](values []T, yield func(any, error) bool) bool {
+	for i := range values {
+		return yield(values[i], nil)
+	}
+
+	return true
 }
 
 // BatchStreamReader returns an iterator that yields batches of values from the
@@ -56,21 +124,19 @@ func StreamReader[T any](
 // allocations. If you need to retain batch data beyond the current iteration,
 // you must copy it to your own buffer. For reading all data into a single
 // slice, use the ReadData*All methods on [Channel] instead.
-func BatchStreamReader[T any](
-	ch *Channel,
-	options []ReadOption,
-	dataType DataType,
-	interpret interpreter[T],
-) iter.Seq2[[]T, error] {
-	return func(yield func([]T, error) bool) {
-		opts := readOptions{}
+func BatchStreamReader[T any](ch *Channel, options []ReadOption, interpret interpreter[T]) iter.Seq2[any, error] {
+	return func(yield func(any, error) bool) {
+		opts := readOptions{
+			batchSize:   0,
+			shouldScale: true,
+		}
 		for _, opt := range options {
 			opt(&opts)
 		}
 
 		if opts.batchSize == 0 {
 			opts.batchSize = 2056
-			if dataType == DataTypeString {
+			if ch.DataType == DataTypeString {
 				// Strings are generally much larger than individual ints or
 				// floats, so we use much smaller default batch size.
 				opts.batchSize = 256
@@ -80,7 +146,17 @@ func BatchStreamReader[T any](
 		// If we have fewer data points in total than a single batch size, we
 		// can allocate only what we need.
 		batchSize := min(opts.batchSize, int(ch.totalNumValues))
-		dataSize := dataType.Size()
+		dataSize := ch.DataType.Size()
+
+		var scaler *Multiscaler
+		if opts.shouldScale {
+			var err error
+			scaler, err = getChannelScaler(ch, batchSize)
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+		}
 
 		buf := make([]byte, batchSize*dataSize)
 		bufLen := uint64(len(buf))
@@ -98,7 +174,7 @@ func BatchStreamReader[T any](
 			// Special case for strings, where the indices into the strings are
 			// stored at the beginning of the chunk.
 			strOffsets := []uint32{0}
-			if dataType == DataTypeString {
+			if ch.DataType == DataTypeString {
 				strOffsetsBytes := make([]byte, chunk.numValues*4)
 				if n, err := r.Read(strOffsetsBytes); err != nil {
 					yield(nil, err)
@@ -126,7 +202,7 @@ func BatchStreamReader[T any](
 				// For strings, our buf starts with length 0 because data size
 				// is 0. Now that we know how long each value is, we can make
 				// buf big enough to hold the values for this batch.
-				if dataType == DataTypeString {
+				if ch.DataType == DataTypeString {
 					numValuesLeft := 0
 					for i := valuesProcessed; i < int(chunk.numValues); i++ {
 						numValuesLeft++
@@ -219,7 +295,7 @@ func BatchStreamReader[T any](
 					startIdx := int(i) * dataSize
 					endIdx := int(i+1) * dataSize
 
-					if dataType == DataTypeString {
+					if ch.DataType == DataTypeString {
 						// strOffsets should always have one more data point in
 						// it than number of strings – we added the 0 at the
 						// beginning and the last value is the end of the final
@@ -234,10 +310,20 @@ func BatchStreamReader[T any](
 				valuesProcessed += numValuesRead
 
 				// For strings, data size is 0 and we need to pull the
-				// size of each individual string from the offsetes at
+				// size of each individual string from the offsets at
 				// the start of the chunk.
 
-				if !yield(batch[:numValuesRead], nil) {
+				if scaler != nil {
+					scaledBatch, err := scaler.Scale(batch[:numValuesRead])
+					if err != nil {
+						yield(nil, err)
+						return
+					}
+
+					if !yield(scaledBatch, nil) {
+						return
+					}
+				} else if !yield(batch[:numValuesRead], nil) {
 					return
 				}
 			}
@@ -252,15 +338,116 @@ func BatchStreamReader[T any](
 // are still batched while we allocate the values slice up-front. It's also
 // cleaner in terms of the code as we avoid re-implementing the underlying read
 // functionality.
-func readAllData[T any](ch *Channel, options []ReadOption, dataType DataType, interpret interpreter[T]) ([]T, error) {
-	values := make([]T, 0, ch.totalNumValues)
+func readAllData[T any](ch *Channel, options []ReadOption, interpret interpreter[T]) (any, error) {
+	// Remember, scaling can change the type so that it's not the same as what's
+	// set in the channel metadata.
+	var values any
 
-	for batch, err := range BatchStreamReader(ch, options, dataType, interpret) {
+	for batch, err := range BatchStreamReader(ch, options, interpret) {
 		if err != nil {
 			return nil, err
 		}
 
-		values = append(values, batch...)
+		switch v := batch.(type) {
+		case []int8:
+			if values == nil {
+				values = make([]int8, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]int8), v...)
+		case []int16:
+			if values == nil {
+				values = make([]int16, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]int16), v...)
+		case []int32:
+			if values == nil {
+				values = make([]int32, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]int32), v...)
+		case []int64:
+			if values == nil {
+				values = make([]int64, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]int64), v...)
+		case []uint8:
+			if values == nil {
+				values = make([]uint8, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]uint8), v...)
+		case []uint16:
+			if values == nil {
+				values = make([]uint16, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]uint16), v...)
+		case []uint32:
+			if values == nil {
+				values = make([]uint32, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]uint32), v...)
+		case []uint64:
+			if values == nil {
+				values = make([]uint64, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]uint64), v...)
+		case []float32:
+			if values == nil {
+				values = make([]float32, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]float32), v...)
+		case []float64:
+			if values == nil {
+				values = make([]float64, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]float64), v...)
+		case []Float128:
+			if values == nil {
+				values = make([]Float128, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]Float128), v...)
+		case []string:
+			if values == nil {
+				values = make([]string, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]string), v...)
+		case []bool:
+			if values == nil {
+				values = make([]bool, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]bool), v...)
+		case []Timestamp:
+			if values == nil {
+				values = make([]Timestamp, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]Timestamp), v...)
+		case []complex64:
+			if values == nil {
+				values = make([]complex64, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]complex64), v...)
+		case []complex128:
+			if values == nil {
+				values = make([]complex128, 0, ch.totalNumValues)
+			}
+
+			values = append(values.([]complex128), v...)
+		default:
+			return nil, ErrUnsupportedType
+		}
 	}
 
 	return values, nil

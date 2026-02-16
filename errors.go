@@ -32,4 +32,7 @@ var (
 
 	// ErrUnsupportedExcitationType excitation type is not supported by this library.
 	ErrUnsupportedExcitationType = errors.New("unsupported excitation type")
+
+	// ErrUnsupportedTypePromotion means that you're trying to perform a scaling on two separate data types which are incompatible or otherwise unsupported.
+	ErrUnsupportedTypePromotion = errors.New("unsupported type promotion")
 )

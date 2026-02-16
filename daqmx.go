@@ -102,19 +102,35 @@ func (s *formatChangingScaler) ReadProperties(_props Properties, _scaleIndex int
 	return nil
 }
 
-func (s *formatChangingScaler) Scale(_input any, _otherInputs ...any) (any, error) {
+func (s *formatChangingScaler) InputSources() []int {
+	return nil
+}
+
+func (s *formatChangingScaler) OutputType(inputTypes []DataType) (DataType, error) {
+	return DataTypeVoid, nil
+}
+
+func (s *formatChangingScaler) Scale(inputs []any, output any) error {
 	// TODO: Figure out how to represent this.
-	return nil, nil
+	return nil
 }
 
 type digitalLineScaler daqmxScaler
+
+func (s *digitalLineScaler) InputSources() []int {
+	return nil
+}
+
+func (s *digitalLineScaler) OutputType(inputTypes []DataType) (DataType, error) {
+	return DataTypeVoid, nil
+}
 
 func (s *digitalLineScaler) ReadProperties(_props Properties, _scaleIndex int) error {
 	// DAQmx scalers read data from object raw data index, not properties.
 	return nil
 }
 
-func (s *digitalLineScaler) Scale(_input any, _otherInputs ...any) (any, error) {
+func (s *digitalLineScaler) Scale(inputs []any, output any) error {
 	// TODO: Figure out how to represent this.
-	return nil, nil
+	return nil
 }
