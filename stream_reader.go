@@ -110,7 +110,9 @@ func StreamReader[T any](ch *Channel, options []ReadOption, interpret interprete
 
 func yieldSlice[T any](values []T, yield func(any, error) bool) bool {
 	for i := range values {
-		return yield(values[i], nil)
+		if !yield(values[i], nil) {
+			return false
+		}
 	}
 
 	return true
