@@ -3,15 +3,19 @@ package tdms
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
-	"math/cmplx"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/drewsilcock/go-tdms"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 const testDataDir = "testdata"
@@ -55,14 +59,19 @@ type GroupInfo struct {
 }
 
 // ChannelInfo represents expected channel data
+//
+// RawDataType is the data type as stored in the TDMS file (matches ch.DataType).
+// DataType is the output type after scaling is applied (determines which ReadXXX method to use).
+// For channels without scaling, both fields will be the same.
 type ChannelInfo struct {
-	Group      string         `json:"group"`
-	Channel    string         `json:"channel"`
-	DataType   string         `json:"dataType"`
-	Length     int            `json:"length"`
-	Data       any            `json:"data"` // Can be []any, nil, or other types
-	Properties map[string]any `json:"properties"`
-	Statistics *Statistics    `json:"statistics,omitempty"`
+	Group          string         `json:"group"`
+	Channel        string         `json:"channel"`
+	RawDataType    string         `json:"rawDataType"`    // Raw data type stored in TDMS file
+	ScaledDataType string         `json:"scaledDataType"` // Output data type (after scaling)
+	Length         int            `json:"length"`
+	Data           any            `json:"data"` // Can be []any, nil, or other types
+	Properties     map[string]any `json:"properties"`
+	Statistics     *Statistics    `json:"statistics,omitempty"`
 }
 
 // Statistics for large data files where full data isn't included
@@ -131,292 +140,182 @@ func hasFeature(tc TestCase, feature string) bool {
 	return slices.Contains(tc.Features, feature)
 }
 
-// toFloat64Slice converts an any slice to float64 slice
-func toFloat64Slice(t *testing.T, data any) []float64 {
+type SignedInteger interface{ int8 | int16 | int32 | int64 }
+type UnsignedInteger interface {
+	uint8 | uint16 | uint32 | uint64
+}
+type Float interface{ float32 | float64 }
+type Complex interface{ complex64 | complex128 }
+
+// toFloat converts an any to a float
+func toFloat[T Float](t *testing.T, value any) T {
 	t.Helper()
 
-	if data == nil {
-		return nil
-	}
-
-	slice, ok := data.([]any)
-	if !ok {
-		t.Fatalf("Expected []any, got %T", data)
-	}
-
-	result := make([]float64, len(slice))
-	for i, v := range slice {
-		switch val := v.(type) {
-		case json.Number:
-			num, err := val.Float64()
-			if err != nil {
-				t.Fatalf("Failed to parse json.Number to float64: %v", err)
-			}
-			result[i] = num
-		case float64:
-			result[i] = val
-		case int:
-			result[i] = float64(val)
-		case string:
-			// Handle special float values
-			switch val {
-			case "NaN":
-				result[i] = math.NaN()
-			case "Inf":
-				result[i] = math.Inf(1)
-			case "-Inf":
-				result[i] = math.Inf(-1)
-			default:
-				t.Fatalf("Unknown string value: %s", val)
-			}
+	switch v := value.(type) {
+	case json.Number:
+		num, err := v.Float64()
+		if err != nil {
+			t.Fatalf("Failed to parse json.Number to float64: %v", err)
+		}
+		return T(num)
+	case float64:
+		return T(v)
+	case int:
+		return T(v)
+	case string:
+		// Handle special float values
+		switch v {
+		case "NaN":
+			return T(math.NaN())
+		case "Inf":
+			return T(math.Inf(1))
+		case "-Inf":
+			return T(math.Inf(-1))
 		default:
-			t.Fatalf("Unexpected type in float slice: %T", v)
+			t.Fatalf("Unknown string value: %s", v)
 		}
+	default:
+		t.Fatalf("Unexpected type in float slice: %T", v)
 	}
-	return result
+
+	return 0
 }
 
-// toInt32Slice converts an any slice to int32 slice
-func toInt32Slice(t *testing.T, data any) []int32 {
+func toFloat128(t *testing.T, value any) tdms.Float128 {
 	t.Helper()
 
-	if data == nil {
-		return nil
-	}
-
-	slice, ok := data.([]any)
-	if !ok {
-		t.Fatalf("Expected []any, got %T", data)
-	}
-
-	result := make([]int32, len(slice))
-	for i, v := range slice {
-		switch val := v.(type) {
-		case json.Number:
-			num, err := strconv.ParseInt(string(val), 10, 32)
-			if err != nil {
-				t.Fatalf("Failed to parse json.Number to int32: %v", err)
-			}
-			result[i] = int32(num)
-		case float64:
-			result[i] = int32(val)
-		case int:
-			result[i] = int32(val)
+	switch v := value.(type) {
+	case json.Number:
+		num, err := v.Float64()
+		if err != nil {
+			t.Fatalf("Failed to parse json.Number to float64: %v", err)
+		}
+		return tdms.NewFloat128(num)
+	case float64:
+		return tdms.NewFloat128(v)
+	case int:
+		return tdms.NewFloat128(float64(v))
+	case string:
+		// Handle special float values
+		switch v {
+		case "NaN":
+			return tdms.NewFloat128(math.NaN())
+		case "Inf":
+			return tdms.NewFloat128(math.Inf(1))
+		case "-Inf":
+			return tdms.NewFloat128(math.Inf(-1))
 		default:
-			t.Fatalf("Unexpected type in int32 slice: %T", v)
+			t.Fatalf("Unknown string value: %s", v)
 		}
+	default:
+		t.Fatalf("Unexpected type in float128: %T", v)
 	}
-	return result
+
+	return tdms.NewFloat128(0)
 }
 
-// toInt64Slice converts an any slice to int64 slice
-func toInt64Slice(t *testing.T, data any) []int64 {
+// toSignedInteger converts an any slice to integer slice of specified type.
+func toSignedInteger[T SignedInteger](t *testing.T, value any) T {
 	t.Helper()
 
-	if data == nil {
-		return nil
-	}
-
-	slice, ok := data.([]any)
-	if !ok {
-		t.Fatalf("Expected []any, got %T", data)
-	}
-
-	result := make([]int64, len(slice))
-	for i, v := range slice {
-		switch val := v.(type) {
-		case json.Number:
-			num, err := strconv.ParseInt(string(val), 10, 64)
-			if err != nil {
-				t.Fatalf("Failed to parse json.Number to int64: %v", err)
-			}
-			result[i] = num
-		case float64:
-			result[i] = int64(val)
-		case int:
-			result[i] = int64(val)
-		default:
-			t.Fatalf("Unexpected type in int64 slice: %T", v)
+	switch val := value.(type) {
+	case json.Number:
+		num, err := strconv.ParseInt(string(val), 10, 64)
+		if err != nil {
+			t.Fatalf("Failed to parse json.Number to integer: %v", err)
 		}
+		return T(num)
+	case float64:
+		return T(val)
+	case int:
+		return T(val)
+	default:
+		t.Fatalf("Expected numeric value, got %T", val)
 	}
-	return result
+
+	return 0
 }
 
-// toUint8Slice converts an any slice to uint8 slice
-func toUint8Slice(t *testing.T, data any) []uint8 {
+func toUnsignedInteger[T UnsignedInteger](t *testing.T, value any) T {
 	t.Helper()
 
-	if data == nil {
-		return nil
-	}
-
-	slice, ok := data.([]any)
-	if !ok {
-		t.Fatalf("Expected []any, got %T", data)
-	}
-
-	result := make([]uint8, len(slice))
-	for i, v := range slice {
-		switch val := v.(type) {
-		case json.Number:
-			num, err := strconv.ParseUint(string(val), 10, 8)
-			if err != nil {
-				t.Fatalf("Failed to parse json.Number to uint8: %v", err)
-			}
-			result[i] = uint8(num)
-		case float64:
-			result[i] = uint8(val)
-		case int:
-			result[i] = uint8(val)
-		default:
-			t.Fatalf("Unexpected type in uint8 slice: %T", v)
+	switch val := value.(type) {
+	case json.Number:
+		num, err := strconv.ParseUint(string(val), 10, 64)
+		if err != nil {
+			t.Fatalf("Failed to parse json.Number to unsigned integer: %v", err)
 		}
+		return T(num)
+	case float64:
+		return T(val)
+	case int:
+		return T(val)
+	default:
+		t.Fatalf("Expected numeric value, got %T", val)
+
 	}
-	return result
+
+	return 0
 }
 
-// toUint32Slice converts an any slice to uint32 slice
-func toUint32Slice(t *testing.T, data any) []uint32 {
+// toComplex converts an any containing real & imag values in map to complex64 or complex128.
+func toComplex[T Complex](t *testing.T, value any) T {
 	t.Helper()
 
-	if data == nil {
-		return nil
-	}
-
-	slice, ok := data.([]any)
+	m, ok := value.(map[string]any)
 	if !ok {
-		t.Fatalf("Expected []any, got %T", data)
+		t.Fatalf("Expected map for complex value, got %T", value)
 	}
 
-	result := make([]uint32, len(slice))
-	for i, v := range slice {
-		switch val := v.(type) {
-		case json.Number:
-			num, err := strconv.ParseUint(string(val), 10, 32)
-			if err != nil {
-				t.Fatalf("Failed to parse json.Number to uint32: %v", err)
-			}
-			result[i] = uint32(num)
-		case float64:
-			result[i] = uint32(val)
-		case int:
-			result[i] = uint32(val)
-		default:
-			t.Fatalf("Unexpected type in uint32 slice: %T", v)
+	var realVal, imagVal float64
+	if realNum, ok := m["real"].(json.Number); ok {
+		var err error
+		realVal, err = realNum.Float64()
+		if err != nil {
+			t.Fatalf("Failed to parse real part as float64: %v", err)
 		}
+	} else if realFloat, ok := m["real"].(float64); ok {
+		realVal = realFloat
 	}
-	return result
+
+	if imagNum, ok := m["imag"].(json.Number); ok {
+		var err error
+		imagVal, err = imagNum.Float64()
+		if err != nil {
+			t.Fatalf("Failed to parse imag part as float64: %v", err)
+		}
+	} else if imagFloat, ok := m["imag"].(float64); ok {
+		imagVal = imagFloat
+	}
+
+	return T(complex(realVal, imagVal))
 }
 
-// toStringSlice converts an any slice to string slice
-func toStringSlice(t *testing.T, data any) []string {
+func toTimestamp(t *testing.T, value any) tdms.Timestamp {
 	t.Helper()
 
-	if data == nil {
-		return nil
-	}
-
-	slice, ok := data.([]any)
+	timestampIso, ok := value.(string)
 	if !ok {
-		t.Fatalf("Expected []any, got %T", data)
+		t.Fatalf("Expected string for timestamp value, got %T", value)
 	}
 
-	result := make([]string, len(slice))
-	for i, v := range slice {
-		str, ok := v.(string)
-		if !ok {
-			t.Fatalf("Expected string, got %T", v)
-		}
-		result[i] = str
-	}
-	return result
-}
-
-// toBoolSlice converts an any slice to bool slice
-func toBoolSlice(t *testing.T, data any) []bool {
-	t.Helper()
-
-	if data == nil {
-		return nil
+	ts, err := time.Parse(time.RFC3339Nano, timestampIso)
+	if err == nil {
+		return tdms.NewTimestamp(ts)
 	}
 
-	slice, ok := data.([]any)
-	if !ok {
-		t.Fatalf("Expected []any, got %T", data)
+	ts, err = time.Parse(time.RFC3339, timestampIso)
+	if err == nil {
+		return tdms.NewTimestamp(ts)
 	}
 
-	result := make([]bool, len(slice))
-	for i, v := range slice {
-		b, ok := v.(bool)
-		if !ok {
-			t.Fatalf("Expected bool, got %T", v)
-		}
-		result[i] = b
-	}
-	return result
-}
-
-// toComplex128Slice converts an any slice of complex values to complex128 slice
-func toComplex128Slice(t *testing.T, data any) []complex128 {
-	t.Helper()
-
-	if data == nil {
-		return nil
+	ts, err = time.Parse("2006-01-02T15:04:05", timestampIso)
+	if err == nil {
+		return tdms.NewTimestamp(ts)
 	}
 
-	slice, ok := data.([]any)
-	if !ok {
-		t.Fatalf("Expected []any, got %T", data)
-	}
-
-	result := make([]complex128, len(slice))
-	for i, v := range slice {
-		m, ok := v.(map[string]any)
-		if !ok {
-			t.Fatalf("Expected map for complex value, got %T", v)
-		}
-
-		var real, imag float64
-		if realNum, ok := m["real"].(json.Number); ok {
-			var err error
-			real, err = realNum.Float64()
-			if err != nil {
-				t.Fatalf("Failed to parse real part as float64: %v", err)
-			}
-		} else if realFloat, ok := m["real"].(float64); ok {
-			real = realFloat
-		}
-
-		if imagNum, ok := m["imag"].(json.Number); ok {
-			var err error
-			imag, err = imagNum.Float64()
-			if err != nil {
-				t.Fatalf("Failed to parse imag part as float64: %v", err)
-			}
-		} else if imagFloat, ok := m["imag"].(float64); ok {
-			imag = imagFloat
-		}
-
-		result[i] = complex(real, imag)
-	}
-	return result
-}
-
-// floatEquals compares two floats, handling NaN and Inf
-func floatEquals(a, b float64, tolerance float64) bool {
-	if math.IsNaN(a) && math.IsNaN(b) {
-		return true
-	}
-	if math.IsInf(a, 1) && math.IsInf(b, 1) {
-		return true
-	}
-	if math.IsInf(a, -1) && math.IsInf(b, -1) {
-		return true
-	}
-	if tolerance == 0 {
-		tolerance = 1e-9
-	}
-	return math.Abs(a-b) <= tolerance
+	t.Fatalf("Failed to parse timestamp as time.Time: %v", err)
+	return tdms.Timestamp{}
 }
 
 // =============================================================================
@@ -426,7 +325,7 @@ func floatEquals(a, b float64, tolerance float64) bool {
 func TestTDMSFilesFromManifest(t *testing.T) {
 	// Check if test data directory exists
 	if _, err := os.Stat(testDataDir); os.IsNotExist(err) {
-		t.Skipf("Test data directory %s does not exist. Run the Python generator first.", testDataDir)
+		t.Fatalf("Test data directory %s does not exist. Run the Python generator first.", testDataDir)
 	}
 
 	manifest := loadManifest(t, testDataDir)
@@ -438,12 +337,10 @@ func TestTDMSFilesFromManifest(t *testing.T) {
 
 			filePath := filepath.Join(testDataDir, tc.Filename)
 
-			// Skip if file doesn't exist
 			if _, err := os.Stat(filePath); os.IsNotExist(err) {
-				t.Skipf("Test file %s does not exist", tc.Filename)
+				t.Fatalf("Test file %s does not exist", tc.Filename)
 			}
 
-			// Open the TDMS file
 			f, err := tdms.Open(filePath)
 			if err != nil {
 				t.Fatalf("Failed to open TDMS file %s: %v", tc.Filename, err)
@@ -452,7 +349,6 @@ func TestTDMSFilesFromManifest(t *testing.T) {
 				_ = f.Close()
 			}(f)
 
-			// Run sub-tests
 			t.Run("Groups", func(t *testing.T) {
 				testGroups(t, f, tc)
 			})
@@ -542,23 +438,25 @@ func testChannels(t *testing.T, f *tdms.File, tc TestCase) {
 				continue
 			}
 
-			// Check channel name
 			if ch.Name != expectedCh.Channel {
-				t.Errorf("Channel name mismatch: expected %q, got %q",
-					expectedCh.Channel, ch.Name)
+				t.Errorf("Channel name mismatch: expected %q, got %q", expectedCh.Channel, ch.Name)
 			}
 
-			// Check group name
 			if ch.GroupName != groupName {
 				t.Errorf("Channel %q: group name mismatch: expected %q, got %q",
 					expectedCh.Channel, groupName, ch.GroupName)
 			}
 
-			// Check data type
-			expectedDataType := mapDataType(expectedCh.DataType)
-			if expectedDataType != tdms.DataTypeVoid && ch.DataType != expectedDataType {
-				t.Errorf("Channel %q/%q: data type mismatch: expected %v, got %v",
-					groupName, expectedCh.Channel, expectedDataType, ch.DataType)
+			wantRawDataType := parseDataType(expectedCh.RawDataType)
+			if ch.RawDataType != wantRawDataType {
+				t.Errorf("Channel %q/%q: raw data type mismatch: expected %v, got %v",
+					groupName, expectedCh.Channel, wantRawDataType, ch.RawDataType)
+			}
+
+			wantScaledDataType := parseDataType(expectedCh.ScaledDataType)
+			if ch.ScaledDataType != wantScaledDataType {
+				t.Errorf("Channel %q/%q: scaled data type mismatch: expected %v, got %v",
+					groupName, expectedCh.Channel, wantScaledDataType, ch.ScaledDataType)
 			}
 		}
 	}
@@ -590,6 +488,28 @@ func testChannelData(t *testing.T, f *tdms.File, tc TestCase) {
 			continue
 		}
 
+		wantRawDataType := parseDataType(expectedCh.RawDataType)
+		if ch.RawDataType != wantRawDataType {
+			t.Errorf(
+				"Channel %s/%s: expected raw data type %s, got %s",
+				expectedCh.Group,
+				expectedCh.Channel,
+				wantRawDataType,
+				ch.RawDataType,
+			)
+		}
+
+		wantScaledDataType := parseDataType(expectedCh.ScaledDataType)
+		if ch.ScaledDataType != wantScaledDataType {
+			t.Errorf(
+				"Channel %s/%s: expected data type %s, got %s",
+				expectedCh.Group,
+				expectedCh.Channel,
+				wantScaledDataType,
+				ch.ScaledDataType,
+			)
+		}
+
 		// Skip if no data to compare (e.g., large data files)
 		if expectedCh.Data == nil {
 			// For large data, check statistics if available
@@ -599,43 +519,145 @@ func testChannelData(t *testing.T, f *tdms.File, tc TestCase) {
 			continue
 		}
 
-		// Compare actual data based on type
-		switch expectedCh.DataType {
-		case "int8":
-			testInt8Data(t, &ch, expectedCh)
-		case "int16":
-			testInt16Data(t, &ch, expectedCh)
-		case "int32":
-			testInt32Data(t, &ch, expectedCh)
-		case "int64":
-			testInt64Data(t, &ch, expectedCh)
-		case "uint8":
-			testUint8Data(t, &ch, expectedCh)
-		case "uint16":
-			testUint16Data(t, &ch, expectedCh)
-		case "uint32":
-			testUint32Data(t, &ch, expectedCh)
-		case "uint64":
-			testUint64Data(t, &ch, expectedCh)
-		case "float32":
-			testFloat32Data(t, &ch, expectedCh)
-		case "float64":
-			testFloat64Data(t, &ch, expectedCh)
-		case "string":
-			testStringData(t, &ch, expectedCh)
-		case "boolean":
-			testBoolData(t, &ch, expectedCh)
-		case "complex64":
-			testComplex64Data(t, &ch, expectedCh)
-		case "complex128":
-			testComplex128Data(t, &ch, expectedCh)
-		case "timestamp":
-			// Timestamp testing would require parsing ISO format
-			t.Logf("Skipping timestamp data comparison for %s/%s", expectedCh.Group, expectedCh.Channel)
-		default:
-			t.Logf("Unknown data type %s for %s/%s", expectedCh.DataType, expectedCh.Group, expectedCh.Channel)
+		// Scaling is tested separately, so we disable it here.
+		gotData, err := ch.ReadAll(tdms.WithScaling(false))
+		if err != nil {
+			t.Errorf("Failed to read channel data: %v", err)
+			continue
+		}
+
+		opts := cmp.Options{cmpopts.EquateNaNs()}
+		switch ch.ScaledDataType {
+		case tdms.DataTypeFloat32, tdms.DataTypeFloat32WithUnit, tdms.DataTypeComplex64:
+			opts = append(opts, cmpopts.EquateApprox(1e-6, 1e-6))
+		case tdms.DataTypeFloat64, tdms.DataTypeFloat64WithUnit, tdms.DataTypeComplex128:
+			opts = append(opts, cmpopts.EquateApprox(1e-9, 1e-9))
+		}
+
+		wantData := convertSlice(t, expectedCh.Data, wantRawDataType)
+		if !cmp.Equal(wantData, gotData, opts) {
+			t.Errorf(
+				"Channel %s/%s: data mismatch: %s",
+				expectedCh.Group,
+				expectedCh.Channel,
+				cmp.Diff(wantData, gotData, opts),
+			)
 		}
 	}
+}
+
+func convertSlice(t *testing.T, data any, dataType tdms.DataType) any {
+	t.Helper()
+
+	dataValue := reflect.ValueOf(data)
+	if dataValue.Kind() != reflect.Slice {
+		t.Fatalf("expected data to be slice, got %T", data)
+	}
+
+	var out any
+
+	switch dataType {
+	case tdms.DataTypeInt8:
+		slice := make([]int8, dataValue.Len())
+		for i := range slice {
+			slice[i] = toSignedInteger[int8](t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeInt16:
+		slice := make([]int16, dataValue.Len())
+		for i := range slice {
+			slice[i] = toSignedInteger[int16](t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeInt32:
+		slice := make([]int32, dataValue.Len())
+		for i := range slice {
+			slice[i] = toSignedInteger[int32](t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeInt64:
+		slice := make([]int64, dataValue.Len())
+		for i := range slice {
+			slice[i] = toSignedInteger[int64](t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeUint8:
+		slice := make([]uint8, dataValue.Len())
+		for i := range slice {
+			slice[i] = toUnsignedInteger[uint8](t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeUint16:
+		slice := make([]uint16, dataValue.Len())
+		for i := range slice {
+			slice[i] = toUnsignedInteger[uint16](t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeUint32:
+		slice := make([]uint32, dataValue.Len())
+		for i := range slice {
+			slice[i] = toUnsignedInteger[uint32](t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeUint64:
+		slice := make([]uint64, dataValue.Len())
+		for i := range slice {
+			slice[i] = toUnsignedInteger[uint64](t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeFloat32:
+		slice := make([]float32, dataValue.Len())
+		for i := range slice {
+			slice[i] = toFloat[float32](t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeFloat64:
+		slice := make([]float64, dataValue.Len())
+		for i := range slice {
+			slice[i] = toFloat[float64](t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeFloat128:
+		slice := make([]tdms.Float128, dataValue.Len())
+		for i := range slice {
+			slice[i] = toFloat128(t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeBool:
+		slice := make([]bool, dataValue.Len())
+		for i := range slice {
+			slice[i] = dataValue.Index(i).Interface().(bool)
+		}
+		out = slice
+	case tdms.DataTypeString:
+		slice := make([]string, dataValue.Len())
+		for i := range slice {
+			slice[i] = dataValue.Index(i).Interface().(string)
+		}
+		out = slice
+	case tdms.DataTypeTimestamp:
+		slice := make([]tdms.Timestamp, dataValue.Len())
+		for i := range slice {
+			slice[i] = toTimestamp(t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeComplex64:
+		slice := make([]complex64, dataValue.Len())
+		for i := range slice {
+			slice[i] = toComplex[complex64](t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	case tdms.DataTypeComplex128:
+		slice := make([]complex128, dataValue.Len())
+		for i := range slice {
+			slice[i] = toComplex[complex128](t, dataValue.Index(i).Interface())
+		}
+		out = slice
+	default:
+		t.Fatalf("unsupported data type: %v", dataType)
+	}
+
+	return out
 }
 
 func testChannelProperties(t *testing.T, f *tdms.File, tc TestCase) {
@@ -669,343 +691,13 @@ func testChannelProperties(t *testing.T, f *tdms.File, tc TestCase) {
 // DATA TYPE SPECIFIC TESTS
 // =============================================================================
 
-func testInt8Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataInt8All()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read int8 data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toInt32Slice(t, expected.Data) // JSON numbers are float64, convert via int32
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		if int8(expectedData[i]) != data[i] {
-			t.Errorf("Channel %s/%s[%d]: expected %d, got %d",
-				expected.Group, expected.Channel, i, expectedData[i], data[i])
-		}
-	}
-}
-
-func testInt16Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataInt16All()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read int16 data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toInt32Slice(t, expected.Data)
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		if int16(expectedData[i]) != data[i] {
-			t.Errorf("Channel %s/%s[%d]: expected %d, got %d",
-				expected.Group, expected.Channel, i, expectedData[i], data[i])
-		}
-	}
-}
-
-func testInt32Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataInt32All()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read int32 data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toInt32Slice(t, expected.Data)
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		if expectedData[i] != data[i] {
-			t.Errorf("Channel %s/%s[%d]: expected %d, got %d",
-				expected.Group, expected.Channel, i, expectedData[i], data[i])
-		}
-	}
-}
-
-func testInt64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataInt64All()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read int64 data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toInt64Slice(t, expected.Data)
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		if expectedData[i] != data[i] {
-			t.Errorf("Channel %s/%s[%d]: expected %d, got %d",
-				expected.Group, expected.Channel, i, expectedData[i], data[i])
-		}
-	}
-}
-
-func testUint8Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataUint8All()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read uint8 data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toUint8Slice(t, expected.Data)
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		if expectedData[i] != data[i] {
-			t.Errorf("Channel %s/%s[%d]: expected %d, got %d",
-				expected.Group, expected.Channel, i, expectedData[i], data[i])
-		}
-	}
-}
-
-func testUint16Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataUint16All()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read uint16 data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toUint32Slice(t, expected.Data)
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		if uint16(expectedData[i]) != data[i] {
-			t.Errorf("Channel %s/%s[%d]: expected %d, got %d",
-				expected.Group, expected.Channel, i, expectedData[i], data[i])
-		}
-	}
-}
-
-func testUint32Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataUint32All()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read uint32 data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toUint32Slice(t, expected.Data)
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		if expectedData[i] != data[i] {
-			t.Errorf("Channel %s/%s[%d]: expected %d, got %d",
-				expected.Group, expected.Channel, i, expectedData[i], data[i])
-		}
-	}
-}
-
-func testUint64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataUint64All()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read uint64 data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	slice, ok := expected.Data.([]any)
-	if !ok {
-		t.Errorf("Expected []any for data, got %T", expected.Data)
-		return
-	}
-
-	if len(data) != len(slice) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(slice), len(data))
-		return
-	}
-
-	for i := range data {
-		var expectedVal uint64
-		switch v := slice[i].(type) {
-		case json.Number:
-			num, err := strconv.ParseUint(string(v), 10, 64)
-			if err != nil {
-				t.Errorf("Failed to parse json.Number to uint64: %v", err)
-				continue
-			}
-			expectedVal = num
-		case float64:
-			expectedVal = uint64(v)
-		case int:
-			expectedVal = uint64(v)
-		}
-		if expectedVal != data[i] {
-			t.Errorf("Channel %s/%s[%d]: expected %d, got %d",
-				expected.Group, expected.Channel, i, expectedVal, data[i])
-		}
-	}
-}
-
-func testFloat32Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataFloat32All()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read float32 data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toFloat64Slice(t, expected.Data)
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		if !floatEquals(float64(data[i]), expectedData[i], 1e-6) {
-			t.Errorf("Channel %s/%s[%d]: expected %v, got %v",
-				expected.Group, expected.Channel, i, expectedData[i], data[i])
-		}
-	}
-}
-
-func testFloat64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataFloat64All()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read float64 data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toFloat64Slice(t, expected.Data)
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		if !floatEquals(data[i], expectedData[i], 1e-9) {
-			t.Errorf("Channel %s/%s[%d]: expected %v, got %v",
-				expected.Group, expected.Channel, i, expectedData[i], data[i])
-		}
-	}
-}
-
-func testStringData(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataStringAll()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read string data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toStringSlice(t, expected.Data)
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		if expectedData[i] != data[i] {
-			t.Errorf("Channel %s/%s[%d]: expected %q, got %q",
-				expected.Group, expected.Channel, i, expectedData[i], data[i])
-		}
-	}
-}
-
-func testBoolData(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataBoolAll()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read bool data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toBoolSlice(t, expected.Data)
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		if expectedData[i] != data[i] {
-			t.Errorf("Channel %s/%s[%d]: expected %v, got %v",
-				expected.Group, expected.Channel, i, expectedData[i], data[i])
-		}
-	}
-}
-
-func testComplex64Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataComplex64All()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read complex64 data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toComplex128Slice(t, expected.Data)
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		expected64 := complex64(expectedData[i])
-		if !cmplx.IsNaN(complex128(data[i])) && !cmplx.IsNaN(complex128(expected64)) {
-			if real(data[i]) != real(expected64) || imag(data[i]) != imag(expected64) {
-				t.Errorf("Channel %s/%s[%d]: expected %v, got %v",
-					expected.Group, expected.Channel, i, expected64, data[i])
-			}
-		}
-	}
-}
-
-func testComplex128Data(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
-	data, err := ch.ReadDataComplex128All()
-	if err != nil {
-		t.Errorf("Channel %s/%s: failed to read complex128 data: %v", expected.Group, expected.Channel, err)
-		return
-	}
-
-	expectedData := toComplex128Slice(t, expected.Data)
-	if len(data) != len(expectedData) {
-		t.Errorf("Channel %s/%s: length mismatch: expected %d, got %d",
-			expected.Group, expected.Channel, len(expectedData), len(data))
-		return
-	}
-
-	for i := range data {
-		if !floatEquals(real(data[i]), real(expectedData[i]), 1e-9) ||
-			!floatEquals(imag(data[i]), imag(expectedData[i]), 1e-9) {
-			t.Errorf("Channel %s/%s[%d]: expected %v, got %v",
-				expected.Group, expected.Channel, i, expectedData[i], data[i])
-		}
-	}
-}
-
 func testChannelStatistics(t *testing.T, ch *tdms.Channel, expected ChannelInfo) {
+	want := expected.Statistics
 	if expected.Statistics == nil {
 		return
 	}
 
-	data, err := ch.ReadDataFloat64All()
+	data, err := ch.ReadFloat64All()
 	if err != nil {
 		t.Errorf("Channel %s/%s: failed to read data for statistics: %v",
 			expected.Group, expected.Channel, err)
@@ -1017,55 +709,41 @@ func testChannelStatistics(t *testing.T, ch *tdms.Channel, expected ChannelInfo)
 			expected.Group, expected.Channel, expected.Length, len(data))
 	}
 
-	// Check first 10 values
-	for i, expectedVal := range expected.Statistics.First10 {
-		if i >= len(data) {
-			break
-		}
-		if !floatEquals(data[i], expectedVal, 1e-9) {
-			t.Errorf("Channel %s/%s first10[%d]: expected %v, got %v",
-				expected.Group, expected.Channel, i, expectedVal, data[i])
-		}
-	}
-
-	// Check last 10 values
-	for i, expectedVal := range expected.Statistics.Last10 {
-		idx := len(data) - 10 + i
-		if idx < 0 || idx >= len(data) {
-			continue
-		}
-		if !floatEquals(data[idx], expectedVal, 1e-9) {
-			t.Errorf("Channel %s/%s last10[%d]: expected %v, got %v",
-				expected.Group, expected.Channel, i, expectedVal, data[idx])
-		}
-	}
-
 	// Compute and check statistics
-	var sum, min, max float64
-	min = math.Inf(1)
-	max = math.Inf(-1)
+	got := &Statistics{}
+	sum := 0.0
+	got.Min = math.Inf(1)
+	got.Max = math.Inf(-1)
 	for _, v := range data {
 		sum += v
-		if v < min {
-			min = v
+		if v < got.Min {
+			got.Min = v
 		}
-		if v > max {
-			max = v
+		if v > got.Max {
+			got.Max = v
 		}
 	}
-	mean := sum / float64(len(data))
+	got.Mean = sum / float64(len(data))
 
-	if !floatEquals(min, expected.Statistics.Min, 1e-6) {
-		t.Errorf("Channel %s/%s: min mismatch: expected %v, got %v",
-			expected.Group, expected.Channel, expected.Statistics.Min, min)
+	variance := 0.0
+	for _, v := range data {
+		diff := v - got.Mean
+		variance += diff * diff
 	}
-	if !floatEquals(max, expected.Statistics.Max, 1e-6) {
-		t.Errorf("Channel %s/%s: max mismatch: expected %v, got %v",
-			expected.Group, expected.Channel, expected.Statistics.Max, max)
-	}
-	if !floatEquals(mean, expected.Statistics.Mean, 1e-6) {
-		t.Errorf("Channel %s/%s: mean mismatch: expected %v, got %v",
-			expected.Group, expected.Channel, expected.Statistics.Mean, mean)
+	got.Std = math.Sqrt(variance / float64(len(data)))
+
+	got.First10 = make([]float64, 10)
+	copy(got.First10, data[:10])
+
+	got.Last10 = make([]float64, 10)
+	copy(got.Last10, data[len(data)-10:])
+
+	if !cmp.Equal(want, got, cmpopts.EquateApprox(1e-9, 1e-9)) {
+		t.Errorf(
+			"Channel %s/%s: statistics mismatch: %v",
+			expected.Group, expected.Channel,
+			cmp.Diff(want, got, cmpopts.EquateApprox(1e-9, 1e-9)),
+		)
 	}
 }
 
@@ -1073,8 +751,8 @@ func testChannelStatistics(t *testing.T, ch *tdms.Channel, expected ChannelInfo)
 // HELPER FUNCTIONS
 // =============================================================================
 
-// mapDataType maps string data type names to tdms.DataType
-func mapDataType(s string) tdms.DataType {
+// parseDataType converts string TDMS data type name to corresponding tdms.DataType
+func parseDataType(s string) tdms.DataType {
 	switch s {
 	case "int8":
 		return tdms.DataTypeInt8
@@ -1107,64 +785,64 @@ func mapDataType(s string) tdms.DataType {
 	case "complex128":
 		return tdms.DataTypeComplex128
 	default:
-		return tdms.DataTypeVoid
+		panic(fmt.Sprintf("unknown data type %q", s))
 	}
 }
 
 // comparePropertyValue compares a property value from the file with expected value from JSON
-func comparePropertyValue(actual any, expected any) bool {
-	switch e := expected.(type) {
+func comparePropertyValue(got any, want any) bool {
+	switch w := want.(type) {
 	case json.Number:
 		// Handle json.Number from UseNumber() decoder
 		// Try to parse as float64 for comparison
-		expectedFloat, err := e.Float64()
+		expectedFloat, err := w.Float64()
 		if err != nil {
 			return false
 		}
-		switch a := actual.(type) {
+		switch g := got.(type) {
 		case float64:
-			return floatEquals(a, expectedFloat, 1e-9)
+			return cmp.Equal(g, expectedFloat, cmpopts.EquateApprox(1e-9, 1e-9))
 		case float32:
-			return floatEquals(float64(a), expectedFloat, 1e-6)
+			return cmp.Equal(float64(g), expectedFloat, cmpopts.EquateApprox(1e-6, 1e-6))
 		case int:
-			return float64(a) == expectedFloat
+			return float64(g) == expectedFloat
 		case int32:
-			return float64(a) == expectedFloat
+			return float64(g) == expectedFloat
 		case int64:
-			return float64(a) == expectedFloat
+			return float64(g) == expectedFloat
 		case uint32:
-			return float64(a) == expectedFloat
+			return float64(g) == expectedFloat
 		case uint64:
-			return float64(a) == expectedFloat
+			return float64(g) == expectedFloat
 		}
 	case float64:
 		// JSON numbers might still be float64 in some cases
-		switch a := actual.(type) {
+		switch a := got.(type) {
 		case float64:
-			return floatEquals(a, e, 1e-9)
+			return cmp.Equal(a, w, cmpopts.EquateApprox(1e-9, 1e-9))
 		case float32:
-			return floatEquals(float64(a), e, 1e-6)
+			return cmp.Equal(float64(a), w, cmpopts.EquateApprox(1e-6, 1e-6))
 		case int:
-			return float64(a) == e
+			return float64(a) == w
 		case int32:
-			return float64(a) == e
+			return float64(a) == w
 		case int64:
-			return float64(a) == e
+			return float64(a) == w
 		case uint32:
-			return float64(a) == e
+			return float64(a) == w
 		case uint64:
-			return float64(a) == e
+			return float64(a) == w
 		}
 	case string:
-		if a, ok := actual.(string); ok {
-			return a == e
+		if a, ok := got.(string); ok {
+			return a == w
 		}
 	case bool:
-		if a, ok := actual.(bool); ok {
-			return a == e
+		if a, ok := got.(bool); ok {
+			return a == w
 		}
 	case nil:
-		return actual == nil
+		return got == nil
 	}
 	return false
 }
@@ -1207,21 +885,17 @@ func TestMultipleSegments(t *testing.T) {
 				}
 
 				// Read all data and verify length matches expected
-				switch expectedCh.DataType {
+				switch expectedCh.ScaledDataType {
 				case "int32":
-					data, err := ch.ReadDataInt32All()
+					got, err := ch.ReadInt32All()
 					if err != nil {
 						t.Errorf("Failed to read data: %v", err)
 						continue
 					}
-					expectedData := toInt32Slice(t, expectedCh.Data)
-					if len(data) != len(expectedData) {
-						t.Errorf("Length mismatch: expected %d, got %d", len(expectedData), len(data))
-					}
-					for i := range data {
-						if data[i] != expectedData[i] {
-							t.Errorf("Data[%d] mismatch: expected %d, got %d", i, expectedData[i], data[i])
-						}
+
+					want := convertSlice(t, expectedCh.Data, tdms.DataTypeInt32)
+					if !cmp.Equal(want, got) {
+						t.Errorf("Data mismatch: %v", cmp.Diff(want, got))
 					}
 				}
 			}
@@ -1329,7 +1003,7 @@ func TestEmptyChannels(t *testing.T) {
 				}
 
 				// Verify empty channel returns empty data
-				data, err := ch.ReadDataFloat64All()
+				data, err := ch.ReadFloat64All()
 				if err != nil {
 					t.Errorf("Failed to read empty channel: %v", err)
 					continue

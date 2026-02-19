@@ -15,13 +15,13 @@ type File struct {
 	Groups map[string]Group
 
 	// Properties contains all properties associated with the root file object.
-	Properties map[string]Property
+	Properties Properties
 
 	// IsIncomplete indicates whether the file was incompletely written, typically
 	// because LabVIEW crashed while writing the final segment.
 	IsIncomplete bool
 
-	f        io.ReadSeeker
+	r        io.ReadSeeker
 	size     int64
 	isIndex  bool
 	segments []segment
@@ -44,9 +44,9 @@ type Group struct {
 	Channels map[string]Channel
 
 	// Properties contains all properties associated with this group.
-	Properties map[string]Property
+	Properties Properties
 
-	f *File
+	path string
 }
 
 // New creates a [File] from the given [io.ReadSeeker]. Set isIndex to true when
@@ -58,8 +58,8 @@ func New(reader io.ReadSeeker, isIndex bool, size int64) (*File, error) {
 	// segment upfront. For ease of use, we do this here.
 	f := &File{
 		Groups:     make(map[string]Group),
-		Properties: make(map[string]Property),
-		f:          reader,
+		Properties: make(Properties),
+		r:          reader,
 		size:       size,
 		isIndex:    isIndex,
 		objects:    make(map[string]object),
@@ -103,7 +103,7 @@ func Open(filename string) (*File, error) {
 // Close closes the underlying file if the File was created via [Open]. It is
 // safe to call on Files created via [New] (it is a no-op in that case).
 func (t *File) Close() error {
-	if file, ok := t.f.(*os.File); ok && file != nil {
+	if file, ok := t.r.(*os.File); ok && file != nil {
 		return file.Close()
 	}
 
@@ -118,7 +118,7 @@ func (t *File) readMetadata() error {
 	i := 0
 	currentOffset := int64(0)
 
-	_, err := t.f.Seek(0, io.SeekStart)
+	_, err := t.r.Seek(0, io.SeekStart)
 	if err != nil {
 		return fmt.Errorf("failed to seek to beginning of metadata file: %w", err)
 	}
@@ -162,7 +162,7 @@ func (t *File) readMetadata() error {
 		// If we're reading an index file, there's no data so one segment's
 		// metadata leads directly into the next segment's lead in.
 		if !t.isIndex {
-			_, err := t.f.Seek(currentOffset, io.SeekStart)
+			_, err := t.r.Seek(currentOffset, io.SeekStart)
 			if err != nil {
 				return fmt.Errorf("failed to seek to segment %d: %w", i, err)
 			}
@@ -193,7 +193,7 @@ func (t *File) readMetadata() error {
 				Name:       groupName,
 				Properties: obj.properties,
 				Channels:   make(map[string]Channel),
-				f:          t,
+				path:       obj.path,
 			}
 		} else {
 			// This is a channel object, so add it to the group's channels.
@@ -214,12 +214,16 @@ func (t *File) readMetadata() error {
 
 				for chunkIdx := range segment.metadata.numChunks {
 					chunks = append(chunks, dataChunk{
-						offset:        obj.index.offset + int64(chunkIdx*segment.metadata.chunkSize),
-						isInterleaved: segment.leadIn.isInterleaved,
-						order:         segment.leadIn.byteOrder,
-						size:          obj.index.totalSize,
-						numValues:     obj.index.numValues,
-						stride:        obj.index.stride,
+						offset:            obj.index.offset + int64(chunkIdx*segment.metadata.chunkSize),
+						isInterleaved:     segment.leadIn.isInterleaved,
+						isDAQmx:           segment.leadIn.containsDAQMXRawData || obj.index.daqmxScalerType != daqmxScalerTypeNone,
+						order:             segment.leadIn.byteOrder,
+						size:              obj.index.totalSize,
+						numValues:         obj.index.numValues,
+						stride:            obj.index.stride,
+						daqMXBufferWidths: obj.index.daqmxBufferWidths,
+						daqMXBufferSizes:  segment.metadata.daqmxBufferSizes,
+						daqMXScalers:      obj.index.daqmxScalers,
 					})
 				}
 			}
@@ -229,16 +233,25 @@ func (t *File) readMetadata() error {
 				totalNumValues += chunk.numValues
 			}
 
-			channels[channelName] = Channel{
+			channel := Channel{
 				Name:           channelName,
 				GroupName:      groupName,
-				DataType:       obj.index.dataType,
+				RawDataType:    obj.index.dataType,
 				Properties:     obj.properties,
-				f:              t,
+				reader:         t.r,
 				path:           obj.path,
 				dataChunks:     chunks,
 				totalNumValues: totalNumValues,
+				file:           t,
 			}
+
+			channel.scaler, err = getChannelScaler(&channel)
+			if err != nil {
+				return fmt.Errorf("failed to get channel scaler for channel %s", channelName)
+			}
+			channel.ScaledDataType = channel.scaler.outputType
+
+			channels[channelName] = channel
 		}
 	}
 

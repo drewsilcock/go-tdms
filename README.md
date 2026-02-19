@@ -83,11 +83,27 @@ As of February 2026, this is being actively maintained but has not been battled-
 | Complex floating point data types           | ☑️     |
 | Multi-chunk segments                        | ☑️     |
 | Data interleaving                           | ☑️     |
-| Data scaling                                | □      |
-| DAQmx data and scalers                      | □      |
-| Fixed point numerics                        | □      |
+| Data scaling                                | ☑️     |
+| DAQmx data and scalers                      | ☑️ *   |
+| Fixed point numerics                        | □ **   |
+
+\* DAQmx functionality is currently experimental and needs more testing.
+** See note below on fixed point numerics.
 
 ### Future work
+
+#### More tests
+
+We need tests for:
+
+- Interleaved data reading
+- DAQmx data variations
+
+#### Benchmarking
+
+We could do with adding benchmarks for all the different core pieces of functionality, mainly reading file metadata and reading file data.
+
+It'd be interesting to explore performance with very large data files.
 
 #### Data scaling and DAQmx
 

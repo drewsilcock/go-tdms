@@ -5,50 +5,17 @@
 // batches as slices or the individual values. The stream reader that returns
 // individual values still uses batching internally, it just helpfully unwraps
 // the slice for you.
-//
-// TODO: Handle scaling.
 
 package tdms
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"iter"
 )
 
-type interpreter[T any] func([]byte, binary.ByteOrder) T
-
-// StreamReader returns an iterator yielding individual values from the channel.
-//
-// It internally uses batching for performance, but unwraps the batches
-// to yield one value at a time. Use the [BatchSize] option to control the
-// internal buffer size. This is the most convenient way to iterate over channel
-// data when you need to process values individually.
-func StreamReader[T any](
-	ch *Channel,
-	options []ReadOption,
-	dataType DataType,
-	interpret interpreter[T],
-) iter.Seq2[T, error] {
-	return func(yield func(T, error) bool) {
-		for batch, err := range BatchStreamReader(ch, options, dataType, interpret) {
-			if err != nil {
-				yield(*new(T), err)
-				return
-			}
-
-			for _, datum := range batch {
-				if !yield(datum, nil) {
-					return
-				}
-			}
-		}
-	}
-}
-
-// BatchStreamReader returns an iterator that yields batches of values from the
+// batchStreamReader returns an iterator that yields batches of values from the
 // channel. Each batch is a slice of values read from the underlying file. Use
 // the [BatchSize] option to control how many values are read in each batch.
 //
@@ -56,21 +23,73 @@ func StreamReader[T any](
 // allocations. If you need to retain batch data beyond the current iteration,
 // you must copy it to your own buffer. For reading all data into a single
 // slice, use the ReadData*All methods on [Channel] instead.
-func BatchStreamReader[T any](
-	ch *Channel,
-	options []ReadOption,
-	dataType DataType,
-	interpret interpreter[T],
-) iter.Seq2[[]T, error] {
-	return func(yield func([]T, error) bool) {
-		opts := readOptions{}
-		for _, opt := range options {
-			opt(&opts)
+func batchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[any, error] {
+	return func(yield func(any, error) bool) {
+		opts := renderReadOptions(options)
+
+		// For DAQmx data, we need the scaler for two purposes:
+		//
+		// 1. To determine the actual data type (when RawDataType == DataTypeDAQmxRawData)
+		// 2. To get layout info (buffer index, byte offset) for interleaved reading
+		//
+		// Some files (e.g. multi-rate DAQmx) store the actual data type in the
+		// raw data index rather than DataTypeDAQmxRawData, but still use DAQmx
+		// scalers for buffer-based interleaving. We try to extract the scaler
+		// from the channel's scaler chain first. If not found there (e.g. when
+		// NI_Number_Of_Scales is 0), we fall back to the object's raw data
+		// index scalers stored on the data chunk.
+		var daqmxScaler *DAQmxScaler
+		interpreterDataType := ch.RawDataType
+
+		// Try the channel's scaler chain first.
+		if opts.daqmxScaleIndex < len(ch.scaler.scalers) {
+			if s, ok := ch.scaler.scalers[opts.daqmxScaleIndex].(*DAQmxScaler); ok {
+				daqmxScaler = s
+			}
+		}
+
+		// If not found in the scaler chain, try the first chunk's raw data
+		// index scalers. These are always present for DAQmx objects, even
+		// when the channel's scaler chain is empty.
+		if daqmxScaler == nil && len(ch.dataChunks) > 0 && ch.dataChunks[0].daqMXScalers != nil {
+			if s, ok := ch.dataChunks[0].daqMXScalers[opts.daqmxScaleIndex]; ok {
+				daqmxScaler = &s
+			} else if len(ch.dataChunks[0].daqMXScalers) == 1 {
+				// Fall back to the only available scaler when the exact
+				// scaleIndex doesn't match. This handles files where
+				// scaleID is 0xFFFFFFFF (e.g. multi-rate DAQmx files
+				// that store the actual data type instead of
+				// DataTypeDAQmxRawData).
+				for _, s := range ch.dataChunks[0].daqMXScalers {
+					daqmxScaler = &s
+					break
+				}
+			}
+		}
+
+		if ch.RawDataType == DataTypeDAQmxRawData {
+			if daqmxScaler == nil {
+				yield(nil, fmt.Errorf("invalid DAQmx scale index: %d", opts.daqmxScaleIndex))
+				return
+			}
+
+			var err error
+			interpreterDataType, err = daqmxScaler.OutputType(nil)
+			if err != nil {
+				yield(nil, fmt.Errorf("failed to get DAQmx scaler output type: %w", err))
+				return
+			}
+		}
+
+		interpret, err := getInterpreter(interpreterDataType)
+		if err != nil {
+			yield(nil, fmt.Errorf("unable to get byte interpreter: %w", err))
+			return
 		}
 
 		if opts.batchSize == 0 {
 			opts.batchSize = 2056
-			if dataType == DataTypeString {
+			if ch.RawDataType == DataTypeString {
 				// Strings are generally much larger than individual ints or
 				// floats, so we use much smaller default batch size.
 				opts.batchSize = 256
@@ -80,16 +99,29 @@ func BatchStreamReader[T any](
 		// If we have fewer data points in total than a single batch size, we
 		// can allocate only what we need.
 		batchSize := min(opts.batchSize, int(ch.totalNumValues))
-		dataSize := dataType.Size()
+
+		dataSize := ch.RawDataType.Size()
+		if ch.RawDataType == DataTypeDAQmxRawData {
+			dataSize = daqmxScaler.dataType.Size()
+		}
+
+		scaler, _ := NewMultiscaler(ch.RawDataType, nil)
+		if opts.shouldScale {
+			scaler = ch.scaler
+			if err := scaler.Allocate(batchSize); err != nil {
+				yield(nil, fmt.Errorf("failed to allocate scaler for channel %s: %w", ch.Name, err))
+				return
+			}
+		}
 
 		buf := make([]byte, batchSize*dataSize)
 		bufLen := uint64(len(buf))
-		batch := make([]T, batchSize)
-		r := ch.f.f
+		batch := make([]TRaw, batchSize)
+		r := ch.reader
 
 		for _, chunk := range ch.dataChunks {
 			if _, err := r.Seek(chunk.offset, io.SeekStart); err != nil {
-				yield(nil, err)
+				yield(nil, fmt.Errorf("failed to seek chunk %d: %w", chunk.offset, err))
 				return
 			}
 
@@ -98,14 +130,14 @@ func BatchStreamReader[T any](
 			// Special case for strings, where the indices into the strings are
 			// stored at the beginning of the chunk.
 			strOffsets := []uint32{0}
-			if dataType == DataTypeString {
+			if ch.RawDataType == DataTypeString {
 				strOffsetsBytes := make([]byte, chunk.numValues*4)
-				if n, err := r.Read(strOffsetsBytes); err != nil {
-					yield(nil, err)
+				n, err := r.Read(strOffsetsBytes)
+				if err != nil {
+					yield(nil, fmt.Errorf("failed to read chunk %d string offsets: %w", chunk.offset, err))
 					return
-				} else {
-					bytesRead += uint64(n)
 				}
+				bytesRead += uint64(n)
 
 				for i := range chunk.numValues {
 					strOffsets = append(strOffsets, chunk.order.Uint32(strOffsetsBytes[i*4:]))
@@ -123,10 +155,18 @@ func BatchStreamReader[T any](
 					break
 				}
 
+				// For DAQmx/interleaved data, chunk.size may reflect the
+				// total size across all scalers or the full buffer layout,
+				// but we only read one scaler at a time. Stop when we've
+				// consumed all values for this chunk.
+				if uint64(valuesProcessed) >= chunk.numValues {
+					break
+				}
+
 				// For strings, our buf starts with length 0 because data size
 				// is 0. Now that we know how long each value is, we can make
 				// buf big enough to hold the values for this batch.
-				if dataType == DataTypeString {
+				if ch.RawDataType == DataTypeString {
 					numValuesLeft := 0
 					for i := valuesProcessed; i < int(chunk.numValues); i++ {
 						numValuesLeft++
@@ -156,9 +196,12 @@ func BatchStreamReader[T any](
 
 				n := 0
 				var err error
-				if !chunk.isInterleaved {
+
+				if !chunk.isInterleaved && !chunk.isDAQmx {
 					n, err = io.ReadFull(r, buf)
 				} else {
+					// DAQmx is an interleaved format, just one with more advanced interleaving capabilities.
+
 					// You aren't allowed to have interleaved variable-length
 					// data channels.
 					if dataSize == 0 {
@@ -172,37 +215,52 @@ func BatchStreamReader[T any](
 						return
 					}
 
+					initialOffset := int64(0)
+					stride := chunk.stride
+
+					if chunk.isDAQmx {
+						byteOffset := daqmxScaler.offsetWithinStride
+						if daqmxScaler.scalerType == daqmxScalerTypeDigitalLine {
+							// Digital line specifies offset in bits, not bytes.
+							byteOffset = byteOffset / 8
+						}
+
+						stride = int64(chunk.daqMXBufferWidths[daqmxScaler.rawBufferIndex]) - int64(dataSize)
+						for i := range daqmxScaler.rawBufferIndex {
+							initialOffset += int64(chunk.daqMXBufferSizes[i])
+						}
+						initialOffset += int64(byteOffset)
+					}
+
+					// This is very similar to the interleaved reading code – can we unify these code paths?
 					for i := 0; i < len(buf); i += dataSize {
-						if i > 0 {
-							if _, err := r.Seek(chunk.stride, io.SeekCurrent); err != nil {
-								yield(nil, err)
+						if i == 0 {
+							if initialOffset > 0 {
+								if _, err := r.Seek(int64(initialOffset), io.SeekCurrent); err != nil {
+									yield(nil, fmt.Errorf("failed to seek to offset: %w", err))
+									return
+								}
+							}
+						} else {
+							if _, err := r.Seek(stride, io.SeekCurrent); err != nil {
+								yield(nil, fmt.Errorf("failed to seek to next value: %w", err))
 								return
 							}
 						}
 
-						if readLen, err := r.Read(buf[int(i)*dataSize : int(i+1)*dataSize]); err != nil {
-							yield(nil, err)
-							return
-						} else {
-							n += readLen
+						var readLen int
+						readLen, err = r.Read(buf[i : i+dataSize])
+						if err != nil {
+							break
 						}
+						n += readLen
 					}
 				}
 
 				bytesRead += uint64(n)
 
-				// If the final batch doesn't line up with the end of the chunk,
-				// we will get unexpected EOF. If our penultimate batch does
-				// exactly line up with the end of the chunk, we will get EOF
-				// when we try to read the next batch where there's no data
-				// left.
-				if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-					// We've reached the end of the chunk.
-					break
-				}
-
 				if err != nil {
-					yield(nil, err)
+					yield(nil, fmt.Errorf("failed to read data chunk: %w", err))
 					return
 				}
 
@@ -219,7 +277,7 @@ func BatchStreamReader[T any](
 					startIdx := int(i) * dataSize
 					endIdx := int(i+1) * dataSize
 
-					if dataType == DataTypeString {
+					if ch.RawDataType == DataTypeString {
 						// strOffsets should always have one more data point in
 						// it than number of strings – we added the 0 at the
 						// beginning and the last value is the end of the final
@@ -228,16 +286,25 @@ func BatchStreamReader[T any](
 						endIdx = int(strOffsets[i+1])
 					}
 
-					batch[i] = interpret(buf[startIdx:endIdx], chunk.order)
+					val := interpret(buf[startIdx:endIdx], chunk.order)
+					batch[i] = val.(TRaw)
 				}
 
 				valuesProcessed += numValuesRead
 
 				// For strings, data size is 0 and we need to pull the
-				// size of each individual string from the offsetes at
+				// size of each individual string from the offsets at
 				// the start of the chunk.
 
-				if !yield(batch[:numValuesRead], nil) {
+				// If scaling is disabled or not present, Scale() will just
+				// return the input slice.
+				scaledBatch, err := scaler.Scale(batch[:numValuesRead])
+				if err != nil {
+					yield(nil, fmt.Errorf("failed to scale batch: %w", err))
+					return
+				}
+
+				if !yield(scaledBatch, nil) {
 					return
 				}
 			}
@@ -245,23 +312,41 @@ func BatchStreamReader[T any](
 	}
 }
 
-// readAllData reads all data from a channel and put it into a single slice.
-//
-// By re-using BatchStreamReader here, we can avoid having to allocate 2*N bytes
-// – one for the raw bytes and other for the interpreted values. The raw bytes
-// are still batched while we allocate the values slice up-front. It's also
-// cleaner in terms of the code as we avoid re-implementing the underlying read
-// functionality.
-func readAllData[T any](ch *Channel, options []ReadOption, dataType DataType, interpret interpreter[T]) ([]T, error) {
-	values := make([]T, 0, ch.totalNumValues)
-
-	for batch, err := range BatchStreamReader(ch, options, dataType, interpret) {
-		if err != nil {
-			return nil, err
-		}
-
-		values = append(values, batch...)
+func getInterpreter(dataType DataType) (func([]byte, binary.ByteOrder) any, error) {
+	switch dataType {
+	case DataTypeInt8:
+		return func(b []byte, o binary.ByteOrder) any { return interpretInt8(b, o) }, nil
+	case DataTypeInt16:
+		return func(b []byte, o binary.ByteOrder) any { return interpretInt16(b, o) }, nil
+	case DataTypeInt32:
+		return func(b []byte, o binary.ByteOrder) any { return interpretInt32(b, o) }, nil
+	case DataTypeInt64:
+		return func(b []byte, o binary.ByteOrder) any { return interpretInt64(b, o) }, nil
+	case DataTypeUint8:
+		return func(b []byte, o binary.ByteOrder) any { return interpretUint8(b, o) }, nil
+	case DataTypeUint16:
+		return func(b []byte, o binary.ByteOrder) any { return interpretUint16(b, o) }, nil
+	case DataTypeUint32:
+		return func(b []byte, o binary.ByteOrder) any { return interpretUint32(b, o) }, nil
+	case DataTypeUint64:
+		return func(b []byte, o binary.ByteOrder) any { return interpretUint64(b, o) }, nil
+	case DataTypeFloat32, DataTypeFloat32WithUnit:
+		return func(b []byte, o binary.ByteOrder) any { return interpretFloat32(b, o) }, nil
+	case DataTypeFloat64, DataTypeFloat64WithUnit:
+		return func(b []byte, o binary.ByteOrder) any { return interpretFloat64(b, o) }, nil
+	case DataTypeFloat128, DataTypeFloat128WithUnit:
+		return func(b []byte, o binary.ByteOrder) any { return interpretFloat128(b, o) }, nil
+	case DataTypeString:
+		return func(b []byte, o binary.ByteOrder) any { return interpretString(b, o) }, nil
+	case DataTypeBool:
+		return func(b []byte, o binary.ByteOrder) any { return interpretBool(b, o) }, nil
+	case DataTypeTimestamp:
+		return func(b []byte, o binary.ByteOrder) any { return interpretTimestamp(b, o) }, nil
+	case DataTypeComplex64:
+		return func(b []byte, o binary.ByteOrder) any { return interpretComplex64(b, o) }, nil
+	case DataTypeComplex128:
+		return func(b []byte, o binary.ByteOrder) any { return interpretComplex128(b, o) }, nil
+	default:
+		return nil, fmt.Errorf("%w: data type %d", ErrUnsupportedType, dataType)
 	}
-
-	return values, nil
 }

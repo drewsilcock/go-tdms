@@ -7,7 +7,6 @@ import (
 	"math"
 	"slices"
 	"strings"
-	"time"
 )
 
 // This code would be much simpler if we used `binary.Read()`, but that function
@@ -228,18 +227,17 @@ func interpretBool(bytes []byte, order binary.ByteOrder) bool {
 }
 
 func interpretTimestamp(bytes []byte, order binary.ByteOrder) Timestamp {
-	return Timestamp{
-		Timestamp: int64(order.Uint64(bytes)),
-		Remainder: order.Uint64(bytes[8:]),
+	timestampBytes := bytes[:8]
+	remainderBytes := bytes[8:]
+	if order == binary.LittleEndian {
+		timestampBytes = bytes[8:]
+		remainderBytes = bytes[:8]
 	}
-}
 
-func interpretTime(bytes []byte, order binary.ByteOrder) time.Time {
-	t := Timestamp{
-		Timestamp: int64(order.Uint64(bytes)),
-		Remainder: order.Uint64(bytes[8:]),
+	return Timestamp{
+		Timestamp: int64(order.Uint64(timestampBytes)),
+		Remainder: order.Uint64(remainderBytes),
 	}
-	return t.AsTime()
 }
 
 func interpretComplex64(bytes []byte, order binary.ByteOrder) complex64 {

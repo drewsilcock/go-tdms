@@ -45,7 +45,7 @@ def numpy_to_python(obj: t.Any) -> t.Any:
     elif isinstance(obj, (np.complexfloating, np.complex64, np.complex128)):
         return {"real": float(obj.real), "imag": float(obj.imag)}
     elif isinstance(obj, datetime):
-        return obj.isoformat()
+        return obj.isoformat(timespec="microsecond")
     elif isinstance(obj, np.datetime64):
         return str(obj)
     elif isinstance(obj, dict):
@@ -136,17 +136,36 @@ class TestManifest:
 
 
 def create_channel_info(
-    group: str, channel: str, data: np.ndarray, properties: dict | None = None
+    group: str,
+    channel: str,
+    data: np.ndarray,
+    properties: dict | None = None,
+    output_dtype: str | None = None,
 ) -> dict:
-    """Create channel info dict for manifest."""
-    return {
+    """Create channel info dict for manifest.
+
+    Args:
+        group: Group name
+        channel: Channel name
+        data: Raw data array
+        properties: Channel properties
+        output_dtype: Output data type after scaling (if different from raw).
+                     If None, uses raw data type.
+    """
+    raw_dtype = get_dtype_string(data)
+    scaled_dtype = output_dtype if output_dtype is not None else raw_dtype
+
+    channel_info = {
         "group": group,
         "channel": channel,
-        "dataType": get_dtype_string(data),
+        "rawDataType": raw_dtype,
+        "scaledDataType": scaled_dtype,
         "length": len(data),
         "data": numpy_to_python(data),
         "properties": numpy_to_python(properties) if properties else {},
     }
+
+    return channel_info
 
 
 def create_group_info(name: str, properties: dict | None = None) -> dict:
@@ -608,7 +627,13 @@ def generate_with_linear_scaling(output_dir: Path, manifest: TestManifest):
             "root": {"properties": {}},
             "groups": [create_group_info("Scaled")],
             "channels": [
-                create_channel_info("Scaled", "linear_scaled", raw_data, linear_props)
+                create_channel_info(
+                    "Scaled",
+                    "linear_scaled",
+                    raw_data,
+                    linear_props,
+                    output_dtype="float64",
+                )
             ],
             "scaling": {
                 "linear_scaled": {
@@ -666,7 +691,13 @@ def generate_with_polynomial_scaling(output_dir: Path, manifest: TestManifest):
             "root": {"properties": {}},
             "groups": [create_group_info("Scaled")],
             "channels": [
-                create_channel_info("Scaled", "polynomial_scaled", raw_data, poly_props)
+                create_channel_info(
+                    "Scaled",
+                    "polynomial_scaled",
+                    raw_data,
+                    poly_props,
+                    output_dtype="float64",
+                )
             ],
             "scaling": {
                 "polynomial_scaled": {
@@ -719,7 +750,13 @@ def generate_with_thermocouple_scaling(output_dir: Path, manifest: TestManifest)
             "root": {"properties": {}},
             "groups": [create_group_info("Thermocouples")],
             "channels": [
-                create_channel_info("Thermocouples", "Type_K", voltage_uv, type_k_props)
+                create_channel_info(
+                    "Thermocouples",
+                    "Type_K",
+                    voltage_uv,
+                    type_k_props,
+                    output_dtype="float64",
+                )
             ],
             "scaling": {
                 "Type_K": {
@@ -776,7 +813,11 @@ def generate_with_rtd_scaling(output_dir: Path, manifest: TestManifest):
             "features": ["scaling", "rtd_scaling"],
             "root": {"properties": {}},
             "groups": [create_group_info("RTD")],
-            "channels": [create_channel_info("RTD", "PT100", voltage, rtd_props)],
+            "channels": [
+                create_channel_info(
+                    "RTD", "PT100", voltage, rtd_props, output_dtype="float64"
+                )
+            ],
             "scaling": {
                 "PT100": {
                     "type": "RTD",
@@ -835,7 +876,13 @@ def generate_with_table_scaling(output_dir: Path, manifest: TestManifest):
             "root": {"properties": {}},
             "groups": [create_group_info("Lookup")],
             "channels": [
-                create_channel_info("Lookup", "table_scaled", raw_data, table_props)
+                create_channel_info(
+                    "Lookup",
+                    "table_scaled",
+                    raw_data,
+                    table_props,
+                    output_dtype="float64",
+                )
             ],
             "scaling": {
                 "table_scaled": {
@@ -900,7 +947,13 @@ def generate_chained_scaling(output_dir: Path, manifest: TestManifest):
             "root": {"properties": {}},
             "groups": [create_group_info("Chained")],
             "channels": [
-                create_channel_info("Chained", "multi_scale", raw_data, chained_props)
+                create_channel_info(
+                    "Chained",
+                    "multi_scale",
+                    raw_data,
+                    chained_props,
+                    output_dtype="float64",
+                )
             ],
             "scaling": {
                 "multi_scale": {
@@ -1127,7 +1180,8 @@ def generate_large_data(output_dir: Path, manifest: TestManifest):
                 {
                     "group": "LargeData",
                     "channel": "RandomValues",
-                    "dataType": "float64",
+                    "rawDataType": "float64",
+                    "scaledDataType": "float64",
                     "length": 100000,
                     "data": None,  # Too large to include
                     "properties": {},
@@ -1219,7 +1273,8 @@ def generate_boolean_data(output_dir: Path, manifest: TestManifest):
                 {
                     "group": "Digital",
                     "channel": "BooleanChannel",
-                    "dataType": "boolean",
+                    "rawDataType": "boolean",
+                    "scaledDataType": "boolean",
                     "length": 5,
                     "data": [True, False, True, False, True],
                     "properties": {},
@@ -1365,7 +1420,11 @@ def generate_strain_scaling(output_dir: Path, manifest: TestManifest):
             "groups": [create_group_info("Strain")],
             "channels": [
                 create_channel_info(
-                    "Strain", "quarter_bridge", strain_voltage, strain_props
+                    "Strain",
+                    "quarter_bridge",
+                    strain_voltage,
+                    strain_props,
+                    output_dtype="float64",
                 )
             ],
             "scaling": {

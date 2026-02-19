@@ -20,4 +20,19 @@ var (
 
 	// ErrIncorrectType indicates that a type assertion or conversion failed because the actual type differs from the expected type.
 	ErrIncorrectType = errors.New("incorrect data type")
+
+	// ErrPropertyNotFound indicates that a property was not found in the given object.
+	ErrPropertyNotFound = errors.New("property not found")
+
+	// ErrUnsupportedScaler scaler type in object metadata is not supported by this library.
+	ErrUnsupportedScaler = errors.New("unsupported scaler type")
+
+	// ErrUnsupportedStrainConfiguration strain gauge configuration is not supported by this library.
+	ErrUnsupportedStrainConfiguration = errors.New("unsupported strain gauge configuration")
+
+	// ErrUnsupportedExcitationType excitation type is not supported by this library.
+	ErrUnsupportedExcitationType = errors.New("unsupported excitation type")
+
+	// ErrUnsupportedTypePromotion means that you're trying to perform a scaling on two separate data types which are incompatible or otherwise unsupported.
+	ErrUnsupportedTypePromotion = errors.New("unsupported type promotion")
 )

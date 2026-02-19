@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"time"
 )
@@ -78,6 +79,19 @@ const (
 	// DataTypeDAQmxRawData represents raw DAQmx data.
 	DataTypeDAQmxRawData DataType = 0xFFFFFFFF
 )
+
+const fractionsPerNs uint64 = 18_446_744_073 // 2 ** 64 / 10 ** 9
+
+var tdmsEpoch int64 = time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+
+// Anything with exponent filled with 1s and non-zero mantissa is a NaN – this
+// is the one we choose to use.
+var quadNaN = []byte{
+	0x7f, 0xff, 0x01, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+}
 
 // Size returns the size in bytes of a single value of this data type.
 // Returns 0 for variable-length types like strings.
@@ -219,6 +233,9 @@ func readValue(typeCode DataType, reader io.Reader, byteOrder binary.ByteOrder) 
 // When represented in memory, this type is always little endian. To get a
 // usable value, see [Float128.AsFloat64] and [Float128.AsBigFloat], depending
 // on whether you need the full precision or not.
+//
+// The bytes underlying this type correspond to a little-endian IEEE quad-precision
+// floating point number, with 1-bit sign, 15-bit exponent and 112-bit mantissa.
 type Float128 [16]byte
 
 // String implements the [fmt.Stringer] interface, returning the string representation
@@ -227,10 +244,20 @@ func (f Float128) String() string {
 	return f.AsBigFloat().String()
 }
 
+func (f Float128) IsNaN() bool {
+	exponent := int(f[0]&0x7F)<<8 | int(f[1])
+	return exponent == 0x7fff && !isZeroMantissa(f[2:16])
+}
+
 // AsFloat64 converts the 128-bit extended precision float to a primitive float64.
 // This loses a significant amount of precision. To avoid losing any precision
 // at the cost of usability, see [Float128.AsBigFloat].
 func (f Float128) AsFloat64() float64 {
+	// Big float doesn't handle NaN so we have to handle this separately.
+	if f.IsNaN() {
+		return math.NaN()
+	}
+
 	result, _ := f.AsBigFloat().Float64()
 	return result
 }
@@ -251,10 +278,10 @@ func (f Float128) AsBigFloat() *big.Float {
 	exponent |= uint16(f[1])
 
 	// Extract mantissa (bits 111-0, 112 bits)
-	mantissaBits := make([]byte, 14)
-	copy(mantissaBits, f[2:16])
+	mantissaBits := f[2:16]
 
-	// Quad precision has 113 bits of precision according to IEEE
+	// Quad precision has 113 bits of precision according to IEEE (remember
+	// implicit leading 1).
 	result := new(big.Float).SetPrec(113)
 
 	// Handle special case of nan/inf
@@ -314,6 +341,186 @@ func (f Float128) AsBigFloat() *big.Float {
 	return result
 }
 
+// SetBigFloat sets the Float128 value from a [big.Float].
+// The conversion handles special cases like infinity and zero, and encodes
+// the value into IEEE 754 quad-precision (binary128) format.
+func (f *Float128) SetBigFloat(bf *big.Float) *Float128 {
+	// Clear all bytes first
+	for i := range f {
+		f[i] = 0
+	}
+
+	if bf == nil {
+		return f
+	}
+
+	if bf.IsInf() {
+		// Set exponent to all 1s (0x7FFF)
+		f[0] = 0x7F
+		f[1] = 0xFF
+
+		// Set sign bit if negative infinity
+		if bf.Signbit() {
+			f[0] |= 0x80
+		}
+		return f
+	}
+
+	// Big floats cannot be NaN so we don't need to handle that case.
+
+	// Handle zero
+	if bf.Sign() == 0 {
+		if bf.Signbit() {
+			f[0] |= 0x80
+		}
+		return f
+	}
+
+	// Extract sign
+	sign := bf.Signbit()
+
+	// Get the mantissa and exponent from big.Float
+	// bf = mantissa * 2^exponent where 0.5 <= |mantissa| < 1.0
+	mantissa := new(big.Float).SetPrec(113).Copy(bf)
+	if sign {
+		mantissa.Neg(mantissa)
+	}
+
+	// Get the actual exponent by using MantExp
+	// This returns mantissa in range [0.5, 1) and the exponent
+	exponent := mantissa.MantExp(mantissa)
+
+	// IEEE 754 quad precision format:
+	// - Normalized: 1.fraction * 2^(exponent - bias) where bias = 16383
+	// - Mantissa returned from MantExp is in [0.5, 1), we need [1, 2)
+	// So multiply by 2 and adjust exponent
+	mantissa.Mul(mantissa, big.NewFloat(2))
+	exponent--
+
+	// Check for overflow/underflow
+	// Exponent range for normalized numbers: -16382 to 16383
+	// With bias (16383): 1 to 32766 (0x1 to 0x7FFE)
+	const maxExponent = 16383
+	const minExponent = -16382
+
+	if exponent > maxExponent {
+		// Overflow to infinity
+		f[0] = 0x7F
+		f[1] = 0xFF
+		if sign {
+			f[0] |= 0x80
+		}
+		return f
+	}
+
+	// Handle subnormal numbers (exponent too small for normalized form)
+	var biasedExponent uint16
+	var fraction *big.Float
+
+	if exponent < minExponent {
+		// Subnormal number: exponent = 0, no implicit leading 1
+		biasedExponent = 0
+
+		// Calculate the actual fraction for subnormal
+		// For subnormal: value = fraction * 2^(-16382)
+		// We have: mantissa * 2^exponent
+		// So: fraction = mantissa * 2^(exponent - (-16382)) = mantissa * 2^(exponent + 16382)
+		shift := exponent + 16382
+		fraction = new(big.Float).SetPrec(113).Copy(mantissa)
+		if shift < 0 {
+			// Number too small, underflow to zero
+			return f
+		}
+		// Apply the shift using SetMantExp
+		scaler := new(big.Float).SetMantExp(big.NewFloat(1), shift)
+		fraction.Mul(fraction, scaler)
+	} else {
+		// Normal number
+		biasedExponent = uint16(exponent + 16383)
+
+		// Extract fractional part (mantissa is in [1, 2), we want the fraction after 1)
+		fraction = new(big.Float).SetPrec(113).Sub(mantissa, big.NewFloat(1))
+	}
+
+	// Convert fraction to 112-bit integer
+	// Multiply by 2^112 to get the integer representation
+	scaler := new(big.Int).Lsh(big.NewInt(1), 112)
+	fraction.Mul(fraction, new(big.Float).SetInt(scaler))
+
+	// Convert to integer (with rounding)
+	fractionInt, _ := fraction.Int(nil)
+
+	// Handle potential rounding overflow
+	// If fraction rounded up to 2^112 or beyond, we need to increment exponent
+	maxFraction := new(big.Int).Lsh(big.NewInt(1), 112)
+	if fractionInt.Cmp(maxFraction) >= 0 {
+		if biasedExponent == 0 {
+			// Subnormal rounded up to normal
+			biasedExponent = 1
+			fractionInt.SetInt64(0)
+		} else if biasedExponent < 0x7FFE {
+			// Normal number, increment exponent
+			biasedExponent++
+			fractionInt.SetInt64(0)
+		} else {
+			// Overflow to infinity
+			f[0] = 0x7F
+			f[1] = 0xFF
+			if sign {
+				f[0] |= 0x80
+			}
+			return f
+		}
+	}
+
+	// Encode the 112-bit mantissa into bytes 2-15
+	// Looking at mantissaToBigInt, it processes bytes in order: f[2], f[3], ..., f[15]
+	// shifting left each time. This means f[2] is the MSB and f[15] is the LSB.
+	// So we store the mantissa in big-endian format starting at f[2].
+	fractionBytes := fractionInt.Bytes() // Big-endian from math/big
+
+	// Pad with leading zeros if needed
+	// We need exactly 14 bytes for the 112-bit mantissa
+	offset := 16 - len(fractionBytes)
+	if offset < 2 {
+		// Mantissa too large - take only the most significant 14 bytes
+		offset = 2
+		fractionBytes = fractionBytes[len(fractionBytes)-14:]
+	}
+
+	// Copy mantissa bytes to f[2:16]
+	for i := 0; i < len(fractionBytes); i++ {
+		f[offset+i] = fractionBytes[i]
+	}
+
+	// Encode exponent into bits 112-126 (spans bytes 0-1)
+	// Byte 0: sign bit (bit 7) + upper 7 bits of exponent (bits 6-0)
+	// Byte 1: lower 8 bits of exponent
+	f[0] = byte((biasedExponent >> 8) & 0x7F)
+	f[1] = byte(biasedExponent & 0xFF)
+
+	// Set sign bit (bit 127 = bit 7 of byte 0)
+	if sign {
+		f[0] |= 0x80
+	}
+
+	return f
+}
+
+func (f *Float128) SetFloat64(value float64) *Float128 {
+	// big.Float cannot handle NaN, so we have to handle it ourselves.
+	if math.IsNaN(value) {
+		*f = Float128(quadNaN)
+		return f
+	}
+
+	return f.SetBigFloat(big.NewFloat(value))
+}
+
+func NewFloat128(value float64) Float128 {
+	return *new(Float128).SetFloat64(value)
+}
+
 func isZeroMantissa(mantissaBits []byte) bool {
 	for _, b := range mantissaBits {
 		if b != 0 {
@@ -364,18 +571,19 @@ type Timestamp struct {
 // to nanoseconds. The TDMS format retains approximately 1.8 × 10^10 times more
 // information than [time.Time]. This precision loss is not relevant for most
 // purposes, but important to keep in mind for high-precision applications.
-func (t *Timestamp) AsTime() time.Time {
-	// I'm not sure whether this big.Int stuff is necessary as opposed to doing
-	// `float64(posFractions) * math.Pow(2, -64) * 1e9`. I need to experiment
-	// with some large values to determine.
-	ns := new(big.Int).SetUint64(t.Remainder)
-	ns.Mul(ns, big.NewInt(1e9))
-	ns.Rsh(ns, 64)
-	return time.Unix(t.Timestamp, ns.Int64())
+func (t Timestamp) AsTime() time.Time {
+	return time.Unix(t.Timestamp+tdmsEpoch, int64(t.Remainder/fractionsPerNs)).UTC()
 }
 
 // String implements the [fmt.Stringer] interface, returning the string
 // representation of the timestamp as a time.Time value.
-func (t *Timestamp) String() string {
+func (t Timestamp) String() string {
 	return t.AsTime().String()
+}
+
+func NewTimestamp(t time.Time) Timestamp {
+	return Timestamp{
+		Timestamp: t.Unix() - tdmsEpoch,
+		Remainder: uint64(t.Nanosecond()) * fractionsPerNs,
+	}
 }
