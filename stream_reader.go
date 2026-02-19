@@ -22,7 +22,7 @@ import (
 // Important: The same underlying slice is reused for each batch to avoid
 // allocations. If you need to retain batch data beyond the current iteration,
 // you must copy it to your own buffer. For reading all data into a single
-// slice, use the ReadData*All methods on [Channel] instead.
+// slice, use the Read.*All methods on [Channel] instead.
 func batchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[any, error] {
 	return func(yield func(any, error) bool) {
 		opts := renderReadOptions(options)

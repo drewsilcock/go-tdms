@@ -7,7 +7,7 @@ import (
 	"iter"
 )
 
-// Channel represents a data channel within a [Group]. Use the ReadData methods
+// Channel represents a data channel within a [Group]. Use the Read methods
 // to access the channel's data in a type-safe manner.
 type Channel struct {
 	// Name is the name of this channel.
