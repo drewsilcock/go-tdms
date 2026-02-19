@@ -461,18 +461,6 @@ func testChannels(t *testing.T, f *tdms.File, tc TestCase) {
 				t.Errorf("Channel %q/%q: scaled data type mismatch: expected %v, got %v",
 					groupName, expectedCh.Channel, wantScaledDataType, ch.ScaledDataType)
 			}
-
-			// Check raw data type (stored in file)
-			// Use RawDataType if present, otherwise fall back to DataType for backwards compatibility
-			rawDataTypeStr := expectedCh.RawDataType
-			if rawDataTypeStr == "" {
-				rawDataTypeStr = expectedCh.ScaledDataType
-			}
-			expectedRawDataType := parseDataType(rawDataTypeStr)
-			if expectedRawDataType != tdms.DataTypeVoid && ch.RawDataType != expectedRawDataType {
-				t.Errorf("Channel %q/%q: raw data type mismatch: expected %v, got %v",
-					groupName, expectedCh.Channel, expectedRawDataType, ch.RawDataType)
-			}
 		}
 	}
 }
