@@ -3,7 +3,9 @@
 [![CI](https://github.com/drewsilcock/go-tdms/actions/workflows/ci.yaml/badge.svg)](https://github.com/drewsilcock/go-tdms/actions/workflows/ci.yaml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/drewsilcock/go-tdms.svg)](https://pkg.go.dev/github.com/drewsilcock/go-tdms)
 
-This is a pure Go no-dependency file parser for the Technical Data Management Streaming (TDMS) format used by National Instruments (NI) software such as LabVIEW.
+This is a pure Go no-dependency* file parser for the Technical Data Management Streaming (TDMS) format used by National Instruments (NI) software such as LabVIEW.
+
+*Technically, there's a test dependency, but I'm pretty sure that doesn't get included when you install the package.
 
 ## Usage
 

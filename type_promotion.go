@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"reflect"
 )
 
 // Type promotion, a la:
@@ -185,142 +184,180 @@ func init() {
 	}
 }
 
+// getNumericAccessor returns a closure that reads element i from a typed numeric
+// slice and converts it to T. The type switch happens once per batch; subsequent
+// per-element access is a direct indexed read with no reflection.
+func getNumericAccessor[T Numeric](v any) func(int) T {
+	switch s := v.(type) {
+	case []int8:
+		return func(i int) T { return T(s[i]) }
+	case []int16:
+		return func(i int) T { return T(s[i]) }
+	case []int32:
+		return func(i int) T { return T(s[i]) }
+	case []int64:
+		return func(i int) T { return T(s[i]) }
+	case []uint8:
+		return func(i int) T { return T(s[i]) }
+	case []uint16:
+		return func(i int) T { return T(s[i]) }
+	case []uint32:
+		return func(i int) T { return T(s[i]) }
+	case []uint64:
+		return func(i int) T { return T(s[i]) }
+	case []float32:
+		return func(i int) T { return T(s[i]) }
+	case []float64:
+		return func(i int) T { return T(s[i]) }
+	default:
+		return nil
+	}
+}
+
+// getComplexAccessor returns a closure that reads element i from a typed slice
+// and converts it to a complex type T. Numeric inputs are treated as the real
+// component with zero imaginary part.
+func getComplexAccessor[T complexFloat](v any) func(int) T {
+	switch s := v.(type) {
+	case []complex64:
+		return func(i int) T { return T(s[i]) }
+	case []complex128:
+		return func(i int) T { return T(s[i]) }
+	case []int8:
+		return func(i int) T { return T(complex(float64(s[i]), 0)) }
+	case []int16:
+		return func(i int) T { return T(complex(float64(s[i]), 0)) }
+	case []int32:
+		return func(i int) T { return T(complex(float64(s[i]), 0)) }
+	case []int64:
+		return func(i int) T { return T(complex(float64(s[i]), 0)) }
+	case []uint8:
+		return func(i int) T { return T(complex(float64(s[i]), 0)) }
+	case []uint16:
+		return func(i int) T { return T(complex(float64(s[i]), 0)) }
+	case []uint32:
+		return func(i int) T { return T(complex(float64(s[i]), 0)) }
+	case []uint64:
+		return func(i int) T { return T(complex(float64(s[i]), 0)) }
+	case []float32:
+		return func(i int) T { return T(complex(float64(s[i]), 0)) }
+	case []float64:
+		return func(i int) T { return T(complex(s[i], 0)) }
+	default:
+		return nil
+	}
+}
+
+// getBigFloatAccessor returns a closure that reads element i from a typed slice
+// and converts it to *big.Float. Handles Float128 natively; other numeric types
+// are converted via float64.
+func getBigFloatAccessor(v any) func(int) *big.Float {
+	switch s := v.(type) {
+	case []Float128:
+		return func(i int) *big.Float { return s[i].AsBigFloat() }
+	case []int8:
+		return func(i int) *big.Float { return big.NewFloat(float64(s[i])) }
+	case []int16:
+		return func(i int) *big.Float { return big.NewFloat(float64(s[i])) }
+	case []int32:
+		return func(i int) *big.Float { return big.NewFloat(float64(s[i])) }
+	case []int64:
+		return func(i int) *big.Float { return big.NewFloat(float64(s[i])) }
+	case []uint8:
+		return func(i int) *big.Float { return big.NewFloat(float64(s[i])) }
+	case []uint16:
+		return func(i int) *big.Float { return big.NewFloat(float64(s[i])) }
+	case []uint32:
+		return func(i int) *big.Float { return big.NewFloat(float64(s[i])) }
+	case []uint64:
+		return func(i int) *big.Float { return big.NewFloat(float64(s[i])) }
+	case []float32:
+		return func(i int) *big.Float { return big.NewFloat(float64(s[i])) }
+	case []float64:
+		return func(i int) *big.Float { return big.NewFloat(s[i]) }
+	default:
+		return nil
+	}
+}
+
+// doNumericArithmetic performs element-wise add or subtract on two input slices,
+// writing results to the pre-allocated output slice. Type conversion is handled
+// via getNumericAccessor which does a single type-switch per call.
+func doNumericArithmetic[T Numeric](out []T, left, right any, isAdd bool) error {
+	lf := getNumericAccessor[T](left)
+	rf := getNumericAccessor[T](right)
+	if lf == nil || rf == nil {
+		return fmt.Errorf("unsupported operand types for numeric arithmetic: %T, %T", left, right)
+	}
+
+	if isAdd {
+		for i := range out {
+			out[i] = lf(i) + rf(i)
+		}
+	} else {
+		for i := range out {
+			out[i] = lf(i) - rf(i)
+		}
+	}
+
+	return nil
+}
+
+// doComplexArithmetic performs element-wise add or subtract on two input slices
+// that promote to a complex type.
+func doComplexArithmetic[T complexFloat](out []T, left, right any, isAdd bool) error {
+	lf := getComplexAccessor[T](left)
+	rf := getComplexAccessor[T](right)
+	if lf == nil || rf == nil {
+		return fmt.Errorf("unsupported operand types for complex arithmetic: %T, %T", left, right)
+	}
+
+	if isAdd {
+		for i := range out {
+			out[i] = lf(i) + rf(i)
+		}
+	} else {
+		for i := range out {
+			out[i] = lf(i) - rf(i)
+		}
+	}
+
+	return nil
+}
+
 func makeArithmeticHandler(promotedType DataType, isAdd bool) opHandlerFunc {
 	return func(leftValues any, rightValues any, output any) error {
-		leftVal := reflect.ValueOf(leftValues)
-		rightVal := reflect.ValueOf(rightValues)
-
-		if leftVal.Len() == 0 {
-			return nil
-		}
-
-		// Handle different promoted types
 		switch promotedType {
 		case DataTypeInt8:
-			out := output.([]int8)
-			for i := range leftVal.Len() {
-				l := convertToSignedInteger[int8](leftVal.Index(i))
-				r := convertToSignedInteger[int8](rightVal.Index(i))
-				if isAdd {
-					out[i] = l + r
-				} else {
-					out[i] = l - r
-				}
-			}
-
+			return doNumericArithmetic(output.([]int8), leftValues, rightValues, isAdd)
 		case DataTypeInt16:
-			out := output.([]int16)
-			for i := range leftVal.Len() {
-				l := convertToSignedInteger[int16](leftVal.Index(i))
-				r := convertToSignedInteger[int16](rightVal.Index(i))
-				if isAdd {
-					out[i] = l + r
-				} else {
-					out[i] = l - r
-				}
-			}
-
+			return doNumericArithmetic(output.([]int16), leftValues, rightValues, isAdd)
 		case DataTypeInt32:
-			out := output.([]int32)
-			for i := range leftVal.Len() {
-				l := convertToSignedInteger[int32](leftVal.Index(i))
-				r := convertToSignedInteger[int32](rightVal.Index(i))
-				if isAdd {
-					out[i] = l + r
-				} else {
-					out[i] = l - r
-				}
-			}
-
+			return doNumericArithmetic(output.([]int32), leftValues, rightValues, isAdd)
 		case DataTypeInt64:
-			out := output.([]int64)
-			for i := range leftVal.Len() {
-				l := convertToSignedInteger[int64](leftVal.Index(i))
-				r := convertToSignedInteger[int64](rightVal.Index(i))
-				if isAdd {
-					out[i] = l + r
-				} else {
-					out[i] = l - r
-				}
-			}
-
+			return doNumericArithmetic(output.([]int64), leftValues, rightValues, isAdd)
 		case DataTypeUint8:
-			out := output.([]uint8)
-			for i := range leftVal.Len() {
-				l := convertToUnsignedInteger[uint8](leftVal.Index(i))
-				r := convertToUnsignedInteger[uint8](rightVal.Index(i))
-				if isAdd {
-					out[i] = l + r
-				} else {
-					out[i] = l - r
-				}
-			}
-
+			return doNumericArithmetic(output.([]uint8), leftValues, rightValues, isAdd)
 		case DataTypeUint16:
-			out := output.([]uint16)
-			for i := range leftVal.Len() {
-				l := convertToUnsignedInteger[uint16](leftVal.Index(i))
-				r := convertToUnsignedInteger[uint16](rightVal.Index(i))
-				if isAdd {
-					out[i] = l + r
-				} else {
-					out[i] = l - r
-				}
-			}
-
+			return doNumericArithmetic(output.([]uint16), leftValues, rightValues, isAdd)
 		case DataTypeUint32:
-			out := output.([]uint32)
-			for i := range leftVal.Len() {
-				l := convertToUnsignedInteger[uint32](leftVal.Index(i))
-				r := convertToUnsignedInteger[uint32](rightVal.Index(i))
-				if isAdd {
-					out[i] = l + r
-				} else {
-					out[i] = l - r
-				}
-			}
-
+			return doNumericArithmetic(output.([]uint32), leftValues, rightValues, isAdd)
 		case DataTypeUint64:
-			out := output.([]uint64)
-			for i := range leftVal.Len() {
-				l := convertToUnsignedInteger[uint64](leftVal.Index(i))
-				r := convertToUnsignedInteger[uint64](rightVal.Index(i))
-				if isAdd {
-					out[i] = l + r
-				} else {
-					out[i] = l - r
-				}
-			}
-
+			return doNumericArithmetic(output.([]uint64), leftValues, rightValues, isAdd)
 		case DataTypeFloat32, DataTypeFloat32WithUnit:
-			out := output.([]float32)
-			for i := range leftVal.Len() {
-				l := convertToFloat[float32](leftVal.Index(i))
-				r := convertToFloat[float32](rightVal.Index(i))
-				if isAdd {
-					out[i] = l + r
-				} else {
-					out[i] = l - r
-				}
-			}
-
+			return doNumericArithmetic(output.([]float32), leftValues, rightValues, isAdd)
 		case DataTypeFloat64, DataTypeFloat64WithUnit:
-			out := output.([]float64)
-			for i := range leftVal.Len() {
-				l := convertToFloat[float64](leftVal.Index(i))
-				r := convertToFloat[float64](rightVal.Index(i))
-				if isAdd {
-					out[i] = l + r
-				} else {
-					out[i] = l - r
-				}
-			}
-
+			return doNumericArithmetic(output.([]float64), leftValues, rightValues, isAdd)
 		case DataTypeFloat128, DataTypeFloat128WithUnit:
 			out := output.([]Float128)
-			for i := range leftVal.Len() {
-				l := convertToBigFloat(leftVal.Index(i))
-				r := convertToBigFloat(rightVal.Index(i))
+			lf := getBigFloatAccessor(leftValues)
+			rf := getBigFloatAccessor(rightValues)
+			if lf == nil || rf == nil {
+				return fmt.Errorf("unsupported operand types for Float128 arithmetic: %T, %T", leftValues, rightValues)
+			}
+			for i := range out {
+				l := lf(i)
+				r := rf(i)
 				var result *big.Float
 				if isAdd {
 					result = new(big.Float).Add(l, r)
@@ -329,113 +366,18 @@ func makeArithmeticHandler(promotedType DataType, isAdd bool) opHandlerFunc {
 				}
 				out[i] = *new(Float128).SetBigFloat(result)
 			}
-
+			return nil
 		case DataTypeComplex64:
-			out := output.([]complex64)
-			for i := range leftVal.Len() {
-				l := convertToComplex[complex64](leftVal.Index(i))
-				r := convertToComplex[complex64](rightVal.Index(i))
-				if isAdd {
-					out[i] = l + r
-				} else {
-					out[i] = l - r
-				}
-			}
-
+			return doComplexArithmetic(output.([]complex64), leftValues, rightValues, isAdd)
 		case DataTypeComplex128:
-			out := output.([]complex128)
-			for i := range leftVal.Len() {
-				l := convertToComplex[complex128](leftVal.Index(i))
-				r := convertToComplex[complex128](rightVal.Index(i))
-				if isAdd {
-					out[i] = l + r
-				} else {
-					out[i] = l - r
-				}
-			}
-
+			return doComplexArithmetic(output.([]complex128), leftValues, rightValues, isAdd)
 		default:
 			return fmt.Errorf("unsupported promoted type: %s", promotedType)
 		}
-
-		return nil
 	}
 }
 
-type signedInteger interface{ int8 | int16 | int32 | int64 }
-type unsignedInteger interface {
-	uint8 | uint16 | uint32 | uint64
-}
-type float interface{ float32 | float64 }
 type complexFloat interface{ complex64 | complex128 }
-
-func convertToUnsignedInteger[T unsignedInteger](v reflect.Value) T {
-	if v.CanUint() {
-		return T(v.Uint())
-	}
-
-	if v.CanInt() {
-		return T(v.Int())
-	}
-
-	return 0
-}
-
-func convertToSignedInteger[T signedInteger](v reflect.Value) T {
-	if v.CanInt() {
-		return T(v.Int())
-	}
-
-	if v.CanUint() {
-		return T(v.Uint())
-	}
-
-	return 0
-}
-
-func convertToFloat[T float](v reflect.Value) T {
-	if v.CanFloat() {
-		return T(v.Float())
-	}
-
-	if v.CanInt() {
-		return T(v.Int())
-	}
-
-	if v.CanUint() {
-		return T(v.Uint())
-	}
-
-	return 0
-}
-
-func convertToComplex[T complexFloat](v reflect.Value) T {
-	if v.CanComplex() {
-		return T(v.Complex())
-	}
-
-	if v.CanFloat() {
-		return T(complex(v.Float(), 0))
-	}
-
-	if v.CanInt() {
-		return T(complex(float64(v.Int()), 0))
-	}
-
-	if v.CanUint() {
-		return T(complex(float64(v.Uint()), 0))
-	}
-
-	return 0
-}
-
-func convertToBigFloat(v reflect.Value) *big.Float {
-	if f, ok := v.Interface().(Float128); ok {
-		return f.AsBigFloat()
-	}
-
-	return big.NewFloat(convertToFloat[float64](v))
-}
 
 func getDataType(v any) DataType {
 	switch v.(type) {

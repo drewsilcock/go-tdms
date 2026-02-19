@@ -139,19 +139,9 @@ func standardSegmentTOC() uint32 {
 	return tocMetaData | tocRawData | tocNewObjList
 }
 
-// metadataOnlyTOC returns a TOC for a segment with metadata but no raw data.
-func metadataOnlyTOC() uint32 {
-	return tocMetaData | tocNewObjList
-}
-
 // interleavedSegmentTOC returns a TOC for an interleaved segment.
 func interleavedSegmentTOC() uint32 {
 	return tocMetaData | tocRawData | tocNewObjList | (1 << 5)
-}
-
-// bigEndianSegmentTOC returns a TOC for a big-endian segment.
-func bigEndianSegmentTOC() uint32 {
-	return tocMetaData | tocRawData | tocNewObjList | (1 << 6)
 }
 
 const defaultGroupName = "Group"
@@ -356,15 +346,6 @@ func int32Bytes(values ...int32) []byte {
 
 // int16Bytes converts an int16 slice to its little-endian binary representation.
 func int16Bytes(values ...int16) []byte {
-	var buf bytes.Buffer
-	for _, v := range values {
-		_ = binary.Write(&buf, binary.LittleEndian, v)
-	}
-	return buf.Bytes()
-}
-
-// uint32Bytes converts a uint32 slice to its little-endian binary representation.
-func uint32Bytes(values ...uint32) []byte {
 	var buf bytes.Buffer
 	for _, v := range values {
 		_ = binary.Write(&buf, binary.LittleEndian, v)

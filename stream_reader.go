@@ -167,10 +167,7 @@ func batchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[an
 				// is 0. Now that we know how long each value is, we can make
 				// buf big enough to hold the values for this batch.
 				if ch.RawDataType == DataTypeString {
-					numValuesLeft := 0
-					for i := valuesProcessed; i < int(chunk.numValues); i++ {
-						numValuesLeft++
-					}
+					numValuesLeft := int(chunk.numValues) - valuesProcessed
 
 					requiredNumValues := min(batchSize, numValuesLeft)
 
