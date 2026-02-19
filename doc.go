@@ -15,7 +15,7 @@
 //	for _, group := range file.Groups {
 //		for _, channel := range group.Channels {
 //			// Iterate through individual values (uses batching internally).
-//			for value, err := range channel.ReadDataAsFloat64() {
+//			for value, err := range channel.ReadFloat64() {
 //				if err != nil {
 //					log.Fatal(err)
 //				}
@@ -23,7 +23,7 @@
 //			}
 //
 //			// Iterate through batches of values
-//			for batch, err := range channel.ReadDataAsFloat64Batch() {
+//			for batch, err := range channel.ReadFloat64Batch() {
 //				if err != nil {
 //					log.Fatal(err)
 //				}
@@ -32,7 +32,7 @@
 //
 //			// Batch size is configurable (both for individual value streamer and
 //			// batch streamer)
-//			for batch, err := range channel.ReadDataAsFloat64Batch(tdms.BatchSize(1024)) {
+//			for batch, err := range channel.ReadFloat64Batch(tdms.BatchSize(1024)) {
 //				if err != nil {
 //					log.Fatal(err)
 //				}
@@ -40,7 +40,7 @@
 //			}
 //
 //			// Read all values into a single slice
-//			values, err := channel.ReadDataAsFloat64All() {
+//			values, err := channel.ReadFloat64All() {
 //			if err != nil {
 //				log.Fatal(err)
 //			}

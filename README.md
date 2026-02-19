@@ -27,7 +27,7 @@ defer file.Close()
 for _, group := range file.Groups {
 	for _, channel := range group.Channels {
 		// Iterate through individual values (uses batching internally).
-		for value, err := range channel.ReadDataAsFloat64() {
+		for value, err := range channel.ReadFloat64() {
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -35,7 +35,7 @@ for _, group := range file.Groups {
 		}
 
 		// Iterate through batches of values.
-		for batch, err := range channel.ReadDataAsFloat64Batch() {
+		for batch, err := range channel.ReadFloat64Batch() {
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -44,7 +44,7 @@ for _, group := range file.Groups {
 
 		// Batch size is configurable (both for individual value streamer and
 		// batch streamer)
-		for batch, err := range channel.ReadDataAsFloat64Batch(tdms.BatchSize(1024)) {
+		for batch, err := range channel.ReadFloat64Batch(tdms.BatchSize(1024)) {
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -52,7 +52,7 @@ for _, group := range file.Groups {
 		}
 
 		// Read all values into a single slice
-		values, err := channel.ReadDataAsFloat64All() {
+		values, err := channel.ReadFloat64All() {
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -68,6 +68,61 @@ if err != nil {
 }
 fmt.Println("Why, this TDMS file was written by none other than ", author)
 ```
+
+### Batching
+
+There are three method variants provided, depending on the output you want:
+
+- `ch.Read()`, `ch.ReadFloat64()`, etc. – returns an iterator that gives individual values. Note that this still internally uses batching as an optimisation, it just unpacks it for your convenience.
+- `ch.ReadBatch()`, `ch.ReadFloat64Batch()`, etc. – return an iterators that gives you the batches of values, where each batch corresponds to the batches used internally for optimisation.
+- `ch.ReadAll()`, `ch.ReadFloat64All()` ,etc. – return all values as a single slice. This still uses batching internally for data parsing and scaling, but puts all the output data into a single slice. This is useful if you know you're dealing with files that fit comfortably in memory and don't need streaming.
+
+It's possible to modify the batch size used with the `tdms.BatchSize(size)` option. Note that the batch size is the number of values, not the number of bytes, which means for data types which are particularly large, you may want to be considerate of keeping the batch size not too big. For instance, using a batch size of 1024 is eminently reasonable for float64 values but if they are strings, each string could potentially be 100 bytes, meaning the batch size is now 100 MB.
+
+### Type safety
+
+We provide both strongly typed functions and functions that return `any` when reading data.
+
+If you call `ch.ReadFloat64()` on a channel where the data is not float64, the method will panic.
+
+If you want to know the output type for a given channel given specified options, run `ch.OutputType(myOption, myOtherOption)`.
+
+If you want to do your own type switch to handle all the different variants, use the method without any type name in its name, e.g. `ch.Read()`.
+
+Remember: scaling can change the data type (e.g. linear scaling converts integers to floating point numbers). See the scaling section below for more details.
+
+### DAQmx
+
+DAQmx data scalers are supported, although they have not been battle tested (real TDMS files have many edge cases and inconsistencies which LabVIEW is happy with even though they're against the "spec").
+
+Using `WithScaling(false)` on a DAQmx channel has no effect as the scalers are required to understand the data.
+
+When reading DAQmx data, you use exactly the same read methods as non-DAQmx data, with the single difference that you should specify which DAQmx scaler you want to read the data for. A single read method call will read the data for one scaler only. By default, `tdms` looks for scaler with scale index 0. This is configurable using `ForDAQmxScaler(scaleIndex)`.
+
+For instance, reading float64 data from a channel for scale index 1:
+
+```golang
+for value, err := range ch.ReadFloat64(ForDAQmxScaler(1)) {
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(value)
+}
+```
+
+If the scaler with the specified scale index does not exist, this will yield an error.
+
+### Scaling
+
+TDMS supports scaling. LabVIEW includes many scalers such as [strain scalers](https://www.ni.com/en/shop/data-acquisition/sensor-fundamentals/measuring-strain-with-strain-gages.html) for sensors that measure deformation of materials, linear scalers for simple ax+b mathematical scalings, and more.
+
+This library supports all of the scalers mentioned on the NI documentation, in addition to the AddScaling and SubtractScaling which are not mentioned.
+
+Our implemention of scaling is based on the fantastic [npTDMS](https://github.com/adamreeve/npTDMS/) library, where the author has reverse engineered the scaling functionality, with the minor addition of the reciprocal scaler which npTDMS doesn't currently support.
+
+By default, the read methods will apply any scaling that is found in the metadata. If you don't want this, you can specify `WithScaling(false)` as an option to your read function.
+
+**Bear in mind** that applying scaling can change the output data type (e.g. linear scaler will convert raw data types that are int32 to float64). If you are checking the output type, do so using the `ch.OutputType(options...)` method and pass your scaling option into that argument. (This will also handle cases where the data is DAQmx data, where an internal conversion to the actual data type is needed based on the input DAQmx scale index.)
 
 ## Status
 
@@ -89,27 +144,17 @@ As of February 2026, this is being actively maintained but has not been battled-
 | DAQmx data and scalers                      | ☑️ *   |
 | Fixed point numerics                        | □ **   |
 
-\* DAQmx functionality is currently experimental and needs more testing.
-** See note below on fixed point numerics.
+\* DAQmx functionality is working, however it has not been battle tested.
+
+\** See note below on fixed point numerics.
 
 ### Future work
-
-#### More tests
-
-We need tests for:
-
-- Interleaved data reading
-- DAQmx data variations
 
 #### Benchmarking
 
 We could do with adding benchmarks for all the different core pieces of functionality, mainly reading file metadata and reading file data.
 
 It'd be interesting to explore performance with very large data files.
-
-#### Data scaling and DAQmx
-
-I need to read up more about how the data scaling works and what exactly DAQmx is. The official documentation on this is either very confusing or non-existent, so the best source is information is usually the npTDMS source code.
 
 #### Fixed point numerics
 
