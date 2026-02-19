@@ -216,13 +216,14 @@ func (t *File) readMetadata() error {
 					chunks = append(chunks, dataChunk{
 						offset:            obj.index.offset + int64(chunkIdx*segment.metadata.chunkSize),
 						isInterleaved:     segment.leadIn.isInterleaved,
-						isDAQmx:           segment.leadIn.containsDAQMXRawData,
+						isDAQmx:           segment.leadIn.containsDAQMXRawData || obj.index.daqmxScalerType != daqmxScalerTypeNone,
 						order:             segment.leadIn.byteOrder,
 						size:              obj.index.totalSize,
 						numValues:         obj.index.numValues,
 						stride:            obj.index.stride,
 						daqMXBufferWidths: obj.index.daqmxBufferWidths,
 						daqMXBufferSizes:  segment.metadata.daqmxBufferSizes,
+						daqMXScalers:      obj.index.daqmxScalers,
 					})
 				}
 			}

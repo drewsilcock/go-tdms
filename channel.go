@@ -62,6 +62,7 @@ type dataChunk struct {
 	stride            int64
 	daqMXBufferWidths []uint32
 	daqMXBufferSizes  []uint64
+	daqMXScalers      map[int]DAQmxScaler
 }
 
 // NumValues returns the total number of data values in this channel across all

@@ -123,7 +123,7 @@ func daqmxChannelMetadata(channelName string, numValues uint64, rawDataWidths []
 	buf.WriteString(path)
 
 	// Raw data index (0x1269 for format changing scaler, 0x126A for digital line)
-	isDigital := len(scalers) > 0 && len(scalers[0]) == 13 // Digital line scalers are 13 bytes
+	isDigital := len(scalers) > 0 && len(scalers[0]) == 17 // Digital line scalers are 17 bytes (4+4+4+1+4)
 	if isDigital {
 		_ = binary.Write(&buf, binary.LittleEndian, uint32(0x126A))
 	} else {
@@ -280,14 +280,14 @@ func TestDAQmxSingleChannelInt16(t *testing.T) {
 	}
 
 	// Should return []int16
-	int16Data, ok := data.([]int16)
+	got, ok := data.([]int16)
 	if !ok {
 		t.Fatalf("Expected data type []int16, got %T", data)
 	}
 
-	expected := []int16{1, 2, -1, -2}
-	if !cmp.Equal(int16Data, expected) {
-		t.Errorf("Data mismatch:\n%s", cmp.Diff(expected, int16Data))
+	want := []int16{1, 2, -1, -2}
+	if !cmp.Equal(want, got) {
+		t.Errorf("Data mismatch:\n%s", cmp.Diff(want, got))
 	}
 }
 
@@ -752,16 +752,6 @@ func TestDAQmxDataTypeEnumValues(t *testing.T) {
 				t.Errorf("Expected %s = %d, got %d", tt.name, tt.expected, tt.typeID)
 			}
 		})
-	}
-}
-
-func TestRawIndexHeaderConstants(t *testing.T) {
-	if rawIndexHeaderFormatChangingScaler != 0x1269 {
-		t.Errorf("Expected rawIndexHeaderFormatChangingScaler = 0x1269, got 0x%X", rawIndexHeaderFormatChangingScaler)
-	}
-
-	if rawIndexHeaderDigitalLineScaler != 0x126A {
-		t.Errorf("Expected rawIndexHeaderDigitalLineScaler = 0x126A, got 0x%X", rawIndexHeaderDigitalLineScaler)
 	}
 }
 

@@ -313,13 +313,63 @@ func (t *File) readSegmentMetadata(segmentOffset int64, leadIn *leadIn, prevSegm
 		}
 	}
 
+	// Detect whether any objects in this segment have DAQmx scalers. Some
+	// files (e.g. multi-rate DAQmx) have DAQmx-style object raw data indexes
+	// without the DAQmx TOC flag set in the lead-in, so we must detect this
+	// from the objects themselves rather than relying solely on the lead-in.
+	hasDAQmxObjects := false
+	for _, obj := range m.objects {
+		if obj.index != nil && obj.index.daqmxScalerType != daqmxScalerTypeNone {
+			hasDAQmxObjects = true
+			break
+		}
+	}
+
 	// Calculate the number of chunks based on the next segment offset and
 	// the total size of each chunk.
-	m.chunkSize = 0
+	if hasDAQmxObjects {
+		// For DAQmx, the physical chunk size is determined by the buffer
+		// widths (the actual byte layout), not by the sum of scaler data
+		// sizes. A buffer can be wider than the scaler data it contains
+		// (e.g. a digital line scaler reads 1 byte from a 4-byte buffer).
+		//
+		// In multi-rate files, different buffers can have different numbers
+		// of values per chunk, so we must compute each buffer's size
+		// independently using the numValues from a channel that maps to it.
+		var bufferWidths []uint32
+		for _, obj := range m.objects {
+			if obj.index != nil && len(obj.index.daqmxBufferWidths) > 0 {
+				bufferWidths = obj.index.daqmxBufferWidths
+				break
+			}
+		}
 
-	for _, obj := range m.objects {
-		if obj.index != nil {
-			m.chunkSize += obj.index.totalSize
+		// Map each buffer index to the numValues for channels in that buffer.
+		bufferNumValues := make(map[uint32]uint64, len(bufferWidths))
+		for _, obj := range m.objects {
+			if obj.index == nil || obj.index.daqmxScalerType == daqmxScalerTypeNone {
+				continue
+			}
+			for _, scaler := range obj.index.daqmxScalers {
+				if _, ok := bufferNumValues[scaler.rawBufferIndex]; !ok {
+					bufferNumValues[scaler.rawBufferIndex] = obj.index.numValues
+				}
+			}
+		}
+
+		m.chunkSize = 0
+		m.daqmxBufferSizes = make([]uint64, len(bufferWidths))
+		for i, w := range bufferWidths {
+			numVals := bufferNumValues[uint32(i)]
+			m.daqmxBufferSizes[i] = uint64(w) * numVals
+			m.chunkSize += m.daqmxBufferSizes[i]
+		}
+	} else {
+		m.chunkSize = 0
+		for _, obj := range m.objects {
+			if obj.index != nil {
+				m.chunkSize += obj.index.totalSize
+			}
 		}
 	}
 
@@ -343,42 +393,16 @@ func (t *File) readSegmentMetadata(segmentOffset int64, leadIn *leadIn, prevSegm
 		}
 
 		obj.index.offset = dataOffset
-		dataOffset += int64(obj.index.totalSize)
+
+		// For DAQmx data, all channels share the same buffer-based raw data
+		// area. The per-channel positioning within the buffers is handled by
+		// the stream reader's initialOffset calculation (using buffer sizes
+		// and scaler byte offsets). We must NOT advance dataOffset here.
+		if obj.index.daqmxScalerType == daqmxScalerTypeNone {
+			dataOffset += int64(obj.index.totalSize)
+		}
 
 		obj.index.stride = int64(m.chunkSize - obj.index.totalSize)
-	}
-
-	// Calculate DAQmx buffer sizes if this is a DAQmx segment
-	if leadIn.containsDAQMXRawData {
-		// Get buffer widths from any object that has them (they should all be the same)
-		var bufferWidths []uint32
-		for _, obj := range m.objects {
-			if obj.index != nil && len(obj.index.daqmxBufferWidths) > 0 {
-				bufferWidths = obj.index.daqmxBufferWidths
-				break
-			}
-		}
-
-		if len(bufferWidths) > 0 && m.numChunks > 0 {
-			// Calculate values per chunk for DAQmx data
-			// For DAQmx, all channels should have the same number of values per chunk
-			var numValuesPerChunk uint64
-			for _, obj := range m.objects {
-				if obj.index != nil && obj.index.numValues > 0 {
-					numValuesPerChunk = obj.index.numValues / m.numChunks
-					if obj.index.numValues%m.numChunks != 0 {
-						// Handle the case where values don't divide evenly
-						numValuesPerChunk = obj.index.numValues
-					}
-					break
-				}
-			}
-
-			m.daqmxBufferSizes = make([]uint64, len(bufferWidths))
-			for i, width := range bufferWidths {
-				m.daqmxBufferSizes[i] = uint64(width) * numValuesPerChunk
-			}
-		}
 	}
 
 	return &m, nil
