@@ -122,6 +122,9 @@ I used a few bits of code and documentation to write this, such as:
 - https://www.ni.com/docs/en-US/bundle/labview/page/tdm-data-model.html
 - https://www.ni.com/en/support/documentation/supplemental/06/introduction-to-labview-tdm-streaming-vis.html
 - https://www.ni.com/docs/en-US/bundle/labwindows-cvi/page/cvi/libref/cvitdmslibrary.htm
+- https://www.ni.com/en/support/documentation/supplemental/18/ni-daqmx-custom-scales-and-usage-explained.html
+- https://www.ni.com/en/shop/data-acquisition/sensor-fundamentals/measuring-strain-with-strain-gages.html#toc1
 - https://github.com/ni/nidaqmx-python
 - https://github.com/ni/tdms-parser/
 - https://github.com/adamreeve/npTDMS/
+- https://github.com/adamreeve/rstdms
