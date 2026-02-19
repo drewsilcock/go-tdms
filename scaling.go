@@ -198,45 +198,147 @@ func (s *LinearScaler) OutputType(inputTypes []DataType) (DataType, error) {
 }
 
 func (s *LinearScaler) Scale(inputs []any, output any) error {
-	out := output.([]float64)
-
-	switch v := inputs[0].(type) {
-	case []int8:
-		linearScale(s, v, out)
-	case []int16:
-		linearScale(s, v, out)
-	case []int32:
-		linearScale(s, v, out)
-	case []int64:
-		linearScale(s, v, out)
-	case []uint8:
-		linearScale(s, v, out)
-	case []uint16:
-		linearScale(s, v, out)
-	case []uint32:
-		linearScale(s, v, out)
-	case []uint64:
-		linearScale(s, v, out)
-	case []float32:
-		linearScale(s, v, out)
-	case []float64:
-		linearScale(s, v, out)
-	default:
-		return fmt.Errorf("unsupported type for linear scaling: %T", v)
-	}
-
-	return nil
-}
-
-func linearScale[T Numeric](s *LinearScaler, values []T, out []float64) {
-	for i, v := range values {
-		out[i] = float64(v)*s.slope + s.intercept
-	}
+	return scaleNumeric(inputs[0], output.([]float64), func(v float64) float64 {
+		return v*s.slope + s.intercept
+	})
 }
 
 type PolynomialScaler struct {
 	baseScaler
 	coefficients []float64
+}
+
+// scaleNumeric dispatches input (a typed numeric slice) through a per-element
+// transform function, writing results to out. This eliminates the need for each
+// scaler to duplicate the same type-switch boilerplate.
+func scaleNumeric(input any, out []float64, fn func(v float64) float64) error {
+	switch v := input.(type) {
+	case []int8:
+		for i, val := range v {
+			out[i] = fn(float64(val))
+		}
+	case []int16:
+		for i, val := range v {
+			out[i] = fn(float64(val))
+		}
+	case []int32:
+		for i, val := range v {
+			out[i] = fn(float64(val))
+		}
+	case []int64:
+		for i, val := range v {
+			out[i] = fn(float64(val))
+		}
+	case []uint8:
+		for i, val := range v {
+			out[i] = fn(float64(val))
+		}
+	case []uint16:
+		for i, val := range v {
+			out[i] = fn(float64(val))
+		}
+	case []uint32:
+		for i, val := range v {
+			out[i] = fn(float64(val))
+		}
+	case []uint64:
+		for i, val := range v {
+			out[i] = fn(float64(val))
+		}
+	case []float32:
+		for i, val := range v {
+			out[i] = fn(float64(val))
+		}
+	case []float64:
+		for i, val := range v {
+			out[i] = fn(float64(val))
+		}
+	default:
+		return fmt.Errorf("unsupported input type for numeric scaling: %T", input)
+	}
+
+	return nil
+}
+
+// scaleNumericWithErr is like scaleNumeric but the transform function can
+// return an error (e.g. for unsupported configurations discovered per-element).
+func scaleNumericWithErr(input any, out []float64, fn func(v float64) (float64, error)) error {
+	switch v := input.(type) {
+	case []int8:
+		for i, val := range v {
+			var err error
+			if out[i], err = fn(float64(val)); err != nil {
+				return err
+			}
+		}
+	case []int16:
+		for i, val := range v {
+			var err error
+			if out[i], err = fn(float64(val)); err != nil {
+				return err
+			}
+		}
+	case []int32:
+		for i, val := range v {
+			var err error
+			if out[i], err = fn(float64(val)); err != nil {
+				return err
+			}
+		}
+	case []int64:
+		for i, val := range v {
+			var err error
+			if out[i], err = fn(float64(val)); err != nil {
+				return err
+			}
+		}
+	case []uint8:
+		for i, val := range v {
+			var err error
+			if out[i], err = fn(float64(val)); err != nil {
+				return err
+			}
+		}
+	case []uint16:
+		for i, val := range v {
+			var err error
+			if out[i], err = fn(float64(val)); err != nil {
+				return err
+			}
+		}
+	case []uint32:
+		for i, val := range v {
+			var err error
+			if out[i], err = fn(float64(val)); err != nil {
+				return err
+			}
+		}
+	case []uint64:
+		for i, val := range v {
+			var err error
+			if out[i], err = fn(float64(val)); err != nil {
+				return err
+			}
+		}
+	case []float32:
+		for i, val := range v {
+			var err error
+			if out[i], err = fn(float64(val)); err != nil {
+				return err
+			}
+		}
+	case []float64:
+		for i, val := range v {
+			var err error
+			if out[i], err = fn(float64(val)); err != nil {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("unsupported input type for numeric scaling: %T", input)
+	}
+
+	return nil
 }
 
 func (s *PolynomialScaler) ReadProperties(props Properties, scaleIndex int) error {
@@ -267,45 +369,25 @@ func (s *PolynomialScaler) OutputType(_inputTypes []DataType) (DataType, error) 
 }
 
 func (s *PolynomialScaler) Scale(inputs []any, output any) error {
-	out := output.([]float64)
+	// Evaluate c[0] + c[1]*x + c[2]*x^2 + ... + c[N-1]*x^(N-1) using
+	// Horner's method for better performance and numerical stability.
+	// This replicates numpy.polynomial.polynomial.polyval.
+	coeffs := s.coefficients
+	n := len(coeffs)
 
-	switch v := inputs[0].(type) {
-	case []int8:
-		polynomialScale(s, v, out)
-	case []int16:
-		polynomialScale(s, v, out)
-	case []int32:
-		polynomialScale(s, v, out)
-	case []int64:
-		polynomialScale(s, v, out)
-	case []uint8:
-		polynomialScale(s, v, out)
-	case []uint16:
-		polynomialScale(s, v, out)
-	case []uint32:
-		polynomialScale(s, v, out)
-	case []uint64:
-		polynomialScale(s, v, out)
-	case []float32:
-		polynomialScale(s, v, out)
-	case []float64:
-		polynomialScale(s, v, out)
-	default:
-		return fmt.Errorf("invalid input type: %T", v)
+	if n == 0 {
+		return scaleNumeric(inputs[0], output.([]float64), func(_ float64) float64 {
+			return 0
+		})
 	}
 
-	return nil
-}
-
-// Calculate c[0] + c[1]*x + c[2]*x^2 + ... + c[N-1]*x^(N-1) where c is the
-// slice of coefficients and N is the number of coefficients. This
-// replicates behaviour of numpy.polynomial.polynomial.polyval.
-func polynomialScale[T Numeric](s *PolynomialScaler, values []T, out []float64) {
-	for coeffIdx, coeff := range s.coefficients {
-		for outIdx := range out {
-			out[outIdx] += coeff * math.Pow(float64(values[outIdx]), float64(coeffIdx))
+	return scaleNumeric(inputs[0], output.([]float64), func(x float64) float64 {
+		result := coeffs[n-1]
+		for i := n - 2; i >= 0; i-- {
+			result = result*x + coeffs[i]
 		}
-	}
+		return result
+	})
 }
 
 // RTDScaler is a scaler for resistance temperature detectors (RTDs).
@@ -376,43 +458,14 @@ func (s *RTDScaler) OutputType(_inputTypes []DataType) (DataType, error) {
 }
 
 func (s *RTDScaler) Scale(inputs []any, output any) error {
-	out := output.([]float64)
-
-	switch v := inputs[0].(type) {
-	case []int8:
-		scaleRTD(s, v, out)
-	case []int16:
-		scaleRTD(s, v, out)
-	case []int32:
-		scaleRTD(s, v, out)
-	case []int64:
-		scaleRTD(s, v, out)
-	case []uint8:
-		scaleRTD(s, v, out)
-	case []uint16:
-		scaleRTD(s, v, out)
-	case []uint32:
-		scaleRTD(s, v, out)
-	case []uint64:
-		scaleRTD(s, v, out)
-	case []float32:
-		scaleRTD(s, v, out)
-	case []float64:
-		scaleRTD(s, v, out)
-	default:
-		return fmt.Errorf("unsupported type: %T", v)
-	}
-
-	return nil
-}
-
-func scaleRTD[T Numeric](s *RTDScaler, values []T, out []float64) {
 	// Callendar-Van Dusen equation:
 	//
 	// R(T) = { R(0)[1 + A*T + B*T^2]                  if T >= 0°C
 	//        { R(0)[1 + A*T + B*T^2 + C*(T - 100)T^3] if T < 0°C
 
-	for i := range out {
+	r0 := s.r0NominalResistance
+
+	return scaleNumeric(inputs[0], output.([]float64), func(v float64) float64 {
 		// If R(T) >= R(0), that means T is more than zero and therefore we can
 		// use the simpler quadratic form which is solved using quadratic
 		// formula:
@@ -422,8 +475,7 @@ func scaleRTD[T Numeric](s *RTDScaler, values []T, out []float64) {
 		//
 		// Remember:
 		// R = V / I, input is volts, current is from scaler config.
-		rt := float64(values[i]) / s.currentExcitation
-		r0 := s.r0NominalResistance
+		rt := v / s.currentExcitation
 
 		// I'm not entirely sure what this is doing physically.
 		rt = adjustForLeadResistance(
@@ -433,15 +485,15 @@ func scaleRTD[T Numeric](s *RTDScaler, values []T, out []float64) {
 			s.leadWireResistance,
 		)
 
-		out[i] = (-s.a + math.Sqrt(s.a*s.a-4*s.b*(1-(rt/r0)))) / (2 * s.b)
+		result := (-s.a + math.Sqrt(s.a*s.a-4*s.b*(1-(rt/r0)))) / (2 * s.b)
 		if rt >= r0 {
-			continue
+			return result
 		}
 
 		// This means we need to use the full quartic version – we have a good
 		// initial guess using the quadratic form, so we can just do a few
 		// iterations of Newton-Raphson to improve on it.
-		temp := out[i]
+		temp := result
 		for range 5 {
 			// f(T) = R(0)[1 + A*T + B*T^2 + C*(T - 100)T^3] - R(T)
 			// df(T)/dT = R(0)[A + 2*B*T + C*(4*T^3 - 300*T^2)]
@@ -450,8 +502,8 @@ func scaleRTD[T Numeric](s *RTDScaler, values []T, out []float64) {
 			temp = temp - f/df
 		}
 
-		out[i] = temp
-	}
+		return temp
+	})
 }
 
 type StrainScalerConfig uint64
@@ -538,42 +590,6 @@ func (s *StrainScaler) OutputType(_inputTypes []DataType) (DataType, error) {
 }
 
 func (s *StrainScaler) Scale(inputs []any, output any) error {
-	out := output.([]float64)
-	var err error
-
-	switch v := inputs[0].(type) {
-	case []int8:
-		err = strainScale(s, v, out)
-	case []int16:
-		err = strainScale(s, v, out)
-	case []int32:
-		err = strainScale(s, v, out)
-	case []int64:
-		err = strainScale(s, v, out)
-	case []uint8:
-		err = strainScale(s, v, out)
-	case []uint16:
-		err = strainScale(s, v, out)
-	case []uint32:
-		err = strainScale(s, v, out)
-	case []uint64:
-		err = strainScale(s, v, out)
-	case []float32:
-		err = strainScale(s, v, out)
-	case []float64:
-		err = strainScale(s, v, out)
-	default:
-		return fmt.Errorf("unsupported input type: %T", v)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to scale input: %w", err)
-	}
-
-	return nil
-}
-
-func strainScale[T Numeric](s *StrainScaler, values []T, out []float64) error {
 	// I'm not going to pretend to understand the reasoning behind these
 	// calculations – we use npTDMS as the guiding voice to help us through
 	// these dark, undocumented features. Take my documented notes below with a
@@ -585,22 +601,25 @@ func strainScale[T Numeric](s *StrainScaler, values []T, out []float64) error {
 	// Where Vex is the excitation voltage and R1-R4 are the resistances from
 	// each resistor in the bridge.
 
-	for i, v := range values {
-		vo := float64(v) - s.initialBridgeVoltage
-		g := s.gageFactor
-		vex := s.voltageExcitation
-		nu := s.poissonRatio
+	g := s.gageFactor
+	vex := s.voltageExcitation
+	nu := s.poissonRatio
 
-		// Gain adjustment is applied after all the other calculations as multiplication.
-		ga := s.gainAdjustment
+	// Gain adjustment is applied after all the other calculations as multiplication.
+	ga := s.gainAdjustment
 
-		// For non-full bridge setups, we apply lead wire resistance adjustment factor, which is:
-		// la = 1 + Rlw / Rg
-		// Where Rlw is the lead wire resistance, Rg is the gage resistance, and
-		// la is the adjustment factor. This is done at the same time as the
-		// gain adjustment, after the other calculations, again as a
-		// multiplication.
-		la := 1 + s.leadWireResistance/s.gageResistance
+	// For non-full bridge setups, we apply lead wire resistance adjustment factor, which is:
+	// la = 1 + Rlw / Rg
+	// Where Rlw is the lead wire resistance, Rg is the gage resistance, and
+	// la is the adjustment factor. This is done at the same time as the
+	// gain adjustment, after the other calculations, again as a
+	// multiplication.
+	la := 1 + s.leadWireResistance/s.gageResistance
+
+	return scaleNumericWithErr(inputs[0], output.([]float64), func(v float64) (float64, error) {
+		vo := v - s.initialBridgeVoltage
+
+		var result float64
 
 		// All the different configurations are explained here:
 		// https://www.ni.com/en/shop/data-acquisition/sensor-fundamentals/measuring-strain-with-strain-gages.html
@@ -613,7 +632,7 @@ func strainScale[T Numeric](s *StrainScaler, values []T, out []float64) error {
 			// Substituting into bridge equation gives:
 			// Vₒ = -ε·G·Vex
 			// ε = - Vₒ / G·Vex
-			out[i] = -vo / (g * vex)
+			result = -vo / (g * vex)
 		case StrainScalerConfigFullBridge2:
 			// Full bridge type II configuration:
 			// R1 = R0 (1 - ε·ν·G)
@@ -624,7 +643,7 @@ func strainScale[T Numeric](s *StrainScaler, values []T, out []float64) error {
 			// Substituting gives:
 			// Vₒ = - (1/2) ε·G·Vex (1 + ν)
 			// ε = -2·Vₒ / (G·Vex (1 + ν))
-			out[i] = -2 * vo / (g * vex * (1 + nu))
+			result = -2 * vo / (g * vex * (1 + nu))
 		case StrainScalerConfigFullBridge3:
 			// Full bridge type III configuration:
 			// R1 = R3 = R0 (1 - ε·ν·G)
@@ -632,7 +651,7 @@ func strainScale[T Numeric](s *StrainScaler, values []T, out []float64) error {
 			// Substituting gives:
 			// Vₒ = -ε·G·Vex (1 + ν) Vex / (2 + ε·G (1 - v))
 			// ε = -2·Vₒ / [G (Vₒ (1 - ν) + Vex (1 + ν))]
-			out[i] = -2 * vo / (g * (vo*(1-nu) + vex*(1+nu)))
+			result = -2 * vo / (g * (vo*(1-nu) + vex*(1+nu)))
 		case StrainScalerConfigHalfBridge1:
 			// Half bridge type I configuration:
 			// R1 = R2 = R0
@@ -642,14 +661,14 @@ func strainScale[T Numeric](s *StrainScaler, values []T, out []float64) error {
 			// Vₒ = [(1 - ε·ν·G) / (2 + ε·G - ε·ν·G - 1/2)] Vex
 			// Rearranging gives:
 			// ε = -4 (Vₒ / Vex) / [G (1 + ν + 2 (Vₒ / Vex) (1 - ν))]
-			out[i] = -4 * (vo / vex) / (g * (1 + nu + 2*(vo/vex)*(1-nu)))
-			out[i] *= la
+			result = -4 * (vo / vex) / (g * (1 + nu + 2*(vo/vex)*(1-nu)))
+			result *= la
 		case StrainScalerConfigHalfBridge2:
 			// R1 = R2 = R0
 			// R3 = R0 (1 - ε·G)
 			// R4 = R0 (1 + ε·G)
-			out[i] = -2 * vo / (g * vex)
-			out[i] *= la
+			result = -2 * vo / (g * vex)
+			result *= la
 		case StrainScalerConfigQuarterBridge1, StrainScalerConfigQuarterBridge2:
 			// Quarter bridge II is the same as quarter bridge I but with an
 			// additional strain gage used to reduce the effects of temperature
@@ -661,16 +680,14 @@ func strainScale[T Numeric](s *StrainScaler, values []T, out []float64) error {
 			// Vₒ = [1 / (2 + ε·G) - 1/2] Vex
 			// Rearranging gives:
 			// ε = (2 / G) · [1 / (1 + 2 Vₒ / Vex) - 1]
-			out[i] = (2 / g) * (1/(1+2*vo/vex) - 1)
-			out[i] *= la
+			result = (2 / g) * (1/(1+2*vo/vex) - 1)
+			result *= la
 		default:
-			return fmt.Errorf("%w: %d", ErrUnsupportedStrainConfiguration, s.configuration)
+			return 0, fmt.Errorf("%w: %d", ErrUnsupportedStrainConfiguration, s.configuration)
 		}
 
-		out[i] *= ga
-	}
-
-	return nil
+		return result * ga, nil
+	})
 }
 
 type TableScaler struct {
@@ -748,40 +765,9 @@ func (s *TableScaler) OutputType(_inputTypes []DataType) (DataType, error) {
 }
 
 func (s *TableScaler) Scale(inputs []any, output any) error {
-	out := output.([]float64)
-
-	switch v := inputs[0].(type) {
-	case []int8:
-		tableScale(s, v, out)
-	case []int16:
-		tableScale(s, v, out)
-	case []int32:
-		tableScale(s, v, out)
-	case []int64:
-		tableScale(s, v, out)
-	case []uint8:
-		tableScale(s, v, out)
-	case []uint16:
-		tableScale(s, v, out)
-	case []uint32:
-		tableScale(s, v, out)
-	case []uint64:
-		tableScale(s, v, out)
-	case []float32:
-		tableScale(s, v, out)
-	case []float64:
-		tableScale(s, v, out)
-	default:
-		return fmt.Errorf("unsupported input type: %T", v)
-	}
-
-	return nil
-}
-
-func tableScale[T Numeric](s *TableScaler, input []T, out []float64) {
-	for i, v := range input {
-		out[i] = interp(v, s.inputValues, s.outputValues, nil, nil)
-	}
+	return scaleNumeric(inputs[0], output.([]float64), func(v float64) float64 {
+		return interp(v, s.inputValues, s.outputValues, nil, nil)
+	})
 }
 
 // ThermistorScaler calculates the temperature of a thermistor from the resistance.
@@ -866,67 +852,29 @@ func (s *ThermistorScaler) OutputType(_inputTypes []DataType) (DataType, error) 
 }
 
 func (s *ThermistorScaler) Scale(inputs []any, output any) error {
-	out := output.([]float64)
-	var err error
-
-	switch v := inputs[0].(type) {
-	case []int8:
-		err = thermistorScale(s, v, out)
-	case []int16:
-		err = thermistorScale(s, v, out)
-	case []int32:
-		err = thermistorScale(s, v, out)
-	case []int64:
-		err = thermistorScale(s, v, out)
-	case []uint8:
-		err = thermistorScale(s, v, out)
-	case []uint16:
-		err = thermistorScale(s, v, out)
-	case []uint32:
-		err = thermistorScale(s, v, out)
-	case []uint64:
-		err = thermistorScale(s, v, out)
-	case []float32:
-		err = thermistorScale(s, v, out)
-	case []float64:
-		err = thermistorScale(s, v, out)
-	default:
-		return fmt.Errorf("unsupported input type: %T", v)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to scale input: %w", err)
-	}
-
-	return nil
-}
-
-func thermistorScale[T Numeric](s *ThermistorScaler, input []T, out []float64) error {
 	// Calculates the temperature of a thermistor from the resistance, using the Steinhart-Hart equation:
 	// 1/T = A + B log R + C (log R)³
 	// Where T = temperature, R = resistance, and A, B, C are Steinhart-Hart coefficients.
 
-	for i, v := range input {
+	return scaleNumericWithErr(inputs[0], output.([]float64), func(v float64) (float64, error) {
 		var rt float64
 
 		switch s.excitationType {
 		case excitationTypeCurrent:
-			rt = float64(v) / s.excitationValue
+			rt = v / s.excitationValue
 		case excitationTypeVoltage:
 			// Voltage divider circuit:
 			// Rt = R1 / [(Vex / Vo) - 1]
-			rt = s.r1ReferenceResistance / (s.excitationValue/float64(v) - 1)
+			rt = s.r1ReferenceResistance / (s.excitationValue/v - 1)
 		default:
-			return fmt.Errorf("%w: %v", ErrUnsupportedExcitationType, s.excitationType)
+			return 0, fmt.Errorf("%w: %v", ErrUnsupportedExcitationType, s.excitationType)
 		}
 
 		rt = adjustForLeadResistance(rt, s.excitationType, s.resistanceConfiguration, s.leadWireResistance)
 		logRt := math.Log(rt)
 
-		out[i] = 1/(s.a+s.b*logRt+s.c*logRt*logRt*logRt) - s.temperatureOffset
-	}
-
-	return nil
+		return 1/(s.a+s.b*logRt+s.c*logRt*logRt*logRt) - s.temperatureOffset, nil
+	})
 }
 
 // ThermocoupleScaler converts voltage to temperature for a thermocouple and vice-versa.
@@ -985,43 +933,13 @@ func (s *ThermocoupleScaler) OutputType(_inputTypes []DataType) (DataType, error
 }
 
 func (s *ThermocoupleScaler) Scale(inputs []any, output any) error {
-	out := output.([]float64)
-
-	switch v := inputs[0].(type) {
-	case []int8:
-		thermocoupleScale(s, v, out)
-	case []int16:
-		thermocoupleScale(s, v, out)
-	case []int32:
-		thermocoupleScale(s, v, out)
-	case []int64:
-		thermocoupleScale(s, v, out)
-	case []uint8:
-		thermocoupleScale(s, v, out)
-	case []uint16:
-		thermocoupleScale(s, v, out)
-	case []uint32:
-		thermocoupleScale(s, v, out)
-	case []uint64:
-		thermocoupleScale(s, v, out)
-	case []float32:
-		thermocoupleScale(s, v, out)
-	case []float64:
-		thermocoupleScale(s, v, out)
-	}
-
-	return nil
-}
-
-func thermocoupleScale[T Numeric](s *ThermocoupleScaler, input []T, out []float64) {
 	// Our conversion equations use millivolts but TDMS stores as microvolts.
-	for i, v := range input {
+	return scaleNumeric(inputs[0], output.([]float64), func(v float64) float64 {
 		if s.scalingDirection == 1 {
-			out[i] = 1000 * s.thermocouple.temperatureToVoltage(float64(v))
-		} else {
-			out[i] = s.thermocouple.voltageToTemperature(float64(v) / 1000)
+			return 1000 * s.thermocouple.temperatureToVoltage(v)
 		}
-	}
+		return s.thermocouple.voltageToTemperature(v / 1000)
+	})
 }
 
 type AddScaler struct {
@@ -1132,27 +1050,8 @@ func (s *ReciprocalScaler) OutputType(inputTypes []DataType) (DataType, error) {
 }
 
 func (s *ReciprocalScaler) Scale(inputs []any, output any) error {
+	// For standard numeric types, use the common dispatch helper.
 	switch v := inputs[0].(type) {
-	case []int8:
-		reciprocalFloat64(v, output.([]float64))
-	case []int16:
-		reciprocalFloat64(v, output.([]float64))
-	case []int32:
-		reciprocalFloat64(v, output.([]float64))
-	case []int64:
-		reciprocalFloat64(v, output.([]float64))
-	case []uint8:
-		reciprocalFloat64(v, output.([]float64))
-	case []uint16:
-		reciprocalFloat64(v, output.([]float64))
-	case []uint32:
-		reciprocalFloat64(v, output.([]float64))
-	case []uint64:
-		reciprocalFloat64(v, output.([]float64))
-	case []float32:
-		reciprocalFloat64(v, output.([]float64))
-	case []float64:
-		reciprocalFloat64(v, output.([]float64))
 	case []Float128:
 		out := output.([]Float128)
 		for i := range v {
@@ -1161,6 +1060,7 @@ func (s *ReciprocalScaler) Scale(inputs []any, output any) error {
 				out[i] = *new(Float128).SetBigFloat(outBf)
 			}
 		}
+		return nil
 	case []complex64:
 		out := output.([]complex64)
 		for i := range v {
@@ -1168,6 +1068,7 @@ func (s *ReciprocalScaler) Scale(inputs []any, output any) error {
 				out[i] = 1 / v[i]
 			}
 		}
+		return nil
 	case []complex128:
 		out := output.([]complex128)
 		for i := range v {
@@ -1175,18 +1076,14 @@ func (s *ReciprocalScaler) Scale(inputs []any, output any) error {
 				out[i] = 1 / v[i]
 			}
 		}
+		return nil
 	default:
-		return fmt.Errorf("%w: %T", ErrUnsupportedType, inputs[0])
-	}
-
-	return nil
-}
-
-func reciprocalFloat64[T Numeric](values []T, output []float64) {
-	for i, v := range values {
-		if v != 0 {
-			output[i] = 1 / float64(v)
-		}
+		return scaleNumeric(v, output.([]float64), func(v float64) float64 {
+			if v != 0 {
+				return 1 / v
+			}
+			return 0
+		})
 	}
 }
 

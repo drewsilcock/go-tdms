@@ -11,7 +11,7 @@ import "sort"
 // fp: y co-ordinates of the data points.
 // left: optional value to return when x < xp[0] (defaults to fp[0])
 // right: optional value to return when x > xp[-1] (defaults to fp[-1])
-func interp[T Numeric](x T, xp, fp []float64, left, right *float64) float64 {
+func interp(x float64, xp, fp []float64, left, right *float64) float64 {
 	if len(xp) != len(fp) {
 		panic("xp and fp must have the same length")
 	}
@@ -29,17 +29,15 @@ func interp[T Numeric](x T, xp, fp []float64, left, right *float64) float64 {
 		rightVal = *right
 	}
 
-	xi := float64(x)
-
-	if xi < xp[0] {
+	if x < xp[0] {
 		return leftVal
 	}
 
-	if xi > xp[len(xp)-1] {
+	if x > xp[len(xp)-1] {
 		return rightVal
 	}
 
-	j := sort.SearchFloat64s(xp, xi)
+	j := sort.SearchFloat64s(xp, x)
 
 	if j == 0 {
 		return leftVal
@@ -48,7 +46,7 @@ func interp[T Numeric](x T, xp, fp []float64, left, right *float64) float64 {
 	x0, x1 := xp[j-1], xp[j]
 	y0, y1 := fp[j-1], fp[j]
 
-	return y0 + (y1-y0)*(xi-x0)/(x1-x0)
+	return y0 + (y1-y0)*(x-x0)/(x1-x0)
 }
 
 func isMonotonicInc(x []float64) bool {
