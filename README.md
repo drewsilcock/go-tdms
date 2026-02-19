@@ -61,8 +61,7 @@ for _, group := range file.Groups {
 }
 
 // Access property value string using the `As[Type]()` methods.
-authorProp := file.Properties["Author"]
-author, err := authorProp.AsString()
+author, err := file.Properties.GetString("Author")
 if err != nil {
 	log.Fatal(err)
 }
