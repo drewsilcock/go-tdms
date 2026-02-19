@@ -114,7 +114,7 @@ func TestReadRealDAQmxFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Skipping test - couldn't open test file: %v", err)
 	}
-	defer file.Close()
+	defer file.Close() // nolint:errcheck // test file cleanup
 
 	t.Logf("Successfully opened file")
 	t.Logf("Groups: %d", len(file.Groups))

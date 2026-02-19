@@ -348,6 +348,39 @@ func (t *File) readSegmentMetadata(segmentOffset int64, leadIn *leadIn, prevSegm
 		obj.index.stride = int64(m.chunkSize - obj.index.totalSize)
 	}
 
+	// Calculate DAQmx buffer sizes if this is a DAQmx segment
+	if leadIn.containsDAQMXRawData {
+		// Get buffer widths from any object that has them (they should all be the same)
+		var bufferWidths []uint32
+		for _, obj := range m.objects {
+			if obj.index != nil && len(obj.index.daqmxBufferWidths) > 0 {
+				bufferWidths = obj.index.daqmxBufferWidths
+				break
+			}
+		}
+
+		if len(bufferWidths) > 0 && m.numChunks > 0 {
+			// Calculate values per chunk for DAQmx data
+			// For DAQmx, all channels should have the same number of values per chunk
+			var numValuesPerChunk uint64
+			for _, obj := range m.objects {
+				if obj.index != nil && obj.index.numValues > 0 {
+					numValuesPerChunk = obj.index.numValues / m.numChunks
+					if obj.index.numValues%m.numChunks != 0 {
+						// Handle the case where values don't divide evenly
+						numValuesPerChunk = obj.index.numValues
+					}
+					break
+				}
+			}
+
+			m.daqmxBufferSizes = make([]uint64, len(bufferWidths))
+			for i, width := range bufferWidths {
+				m.daqmxBufferSizes[i] = uint64(width) * numValuesPerChunk
+			}
+		}
+	}
+
 	return &m, nil
 }
 

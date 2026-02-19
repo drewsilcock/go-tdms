@@ -9,6 +9,7 @@
 package tdms
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -25,13 +26,37 @@ import (
 // slice, use the ReadData*All methods on [Channel] instead.
 func BatchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[any, error] {
 	return func(yield func(any, error) bool) {
-		interpret, err := getInterpreter(ch.RawDataType)
+		opts := renderReadOptions(options)
+
+		// For DAQmx data, we need to get the scaler first to determine the actual data type
+		var daqmxScaler *DAQmxScaler
+		interpreterDataType := ch.RawDataType
+		if ch.RawDataType == DataTypeDAQmxRawData {
+			if opts.daqmxScaleIndex >= len(ch.scaler.scalers) {
+				yield(nil, fmt.Errorf("invalid DAQmx scale index: %d", opts.daqmxScaleIndex))
+				return
+			}
+
+			var ok bool
+			daqmxScaler, ok = ch.scaler.scalers[opts.daqmxScaleIndex].(*DAQmxScaler)
+			if !ok {
+				yield(nil, fmt.Errorf("expected DAQmx scaler, got %T", daqmxScaler))
+				return
+			}
+
+			var err error
+			interpreterDataType, err = daqmxScaler.OutputType(nil)
+			if err != nil {
+				yield(nil, fmt.Errorf("failed to get DAQmx scaler output type: %w", err))
+				return
+			}
+		}
+
+		interpret, err := getInterpreter(interpreterDataType)
 		if err != nil {
 			yield(nil, fmt.Errorf("unable to get byte interpreter: %w", err))
 			return
 		}
-
-		opts := renderReadOptions(options)
 
 		if opts.batchSize == 0 {
 			opts.batchSize = 2056
@@ -45,21 +70,6 @@ func BatchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[an
 		// If we have fewer data points in total than a single batch size, we
 		// can allocate only what we need.
 		batchSize := min(opts.batchSize, int(ch.totalNumValues))
-
-		var daqmxScaler *DAQmxScaler
-		if ch.RawDataType == DataTypeDAQmxRawData {
-			if opts.daqmxScaleIndex >= len(ch.scaler.scalers) {
-				yield(nil, fmt.Errorf("invalid DAQmx scale index: %d", opts.daqmxScaleIndex))
-				return
-			}
-
-			var ok bool
-			daqmxScaler, ok = ch.scaler.scalers[opts.daqmxScaleIndex].(*DAQmxScaler)
-			if !ok {
-				yield(nil, fmt.Errorf("expected DAQmx scaler, got %T", daqmxScaler))
-				return
-			}
-		}
 
 		dataSize := ch.RawDataType.Size()
 		if ch.RawDataType == DataTypeDAQmxRawData {
@@ -281,5 +291,44 @@ func BatchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[an
 				}
 			}
 		}
+	}
+}
+
+func getInterpreter(dataType DataType) (func([]byte, binary.ByteOrder) any, error) {
+	switch dataType {
+	case DataTypeInt8:
+		return func(b []byte, o binary.ByteOrder) any { return interpretInt8(b, o) }, nil
+	case DataTypeInt16:
+		return func(b []byte, o binary.ByteOrder) any { return interpretInt16(b, o) }, nil
+	case DataTypeInt32:
+		return func(b []byte, o binary.ByteOrder) any { return interpretInt32(b, o) }, nil
+	case DataTypeInt64:
+		return func(b []byte, o binary.ByteOrder) any { return interpretInt64(b, o) }, nil
+	case DataTypeUint8:
+		return func(b []byte, o binary.ByteOrder) any { return interpretUint8(b, o) }, nil
+	case DataTypeUint16:
+		return func(b []byte, o binary.ByteOrder) any { return interpretUint16(b, o) }, nil
+	case DataTypeUint32:
+		return func(b []byte, o binary.ByteOrder) any { return interpretUint32(b, o) }, nil
+	case DataTypeUint64:
+		return func(b []byte, o binary.ByteOrder) any { return interpretUint64(b, o) }, nil
+	case DataTypeFloat32, DataTypeFloat32WithUnit:
+		return func(b []byte, o binary.ByteOrder) any { return interpretFloat32(b, o) }, nil
+	case DataTypeFloat64, DataTypeFloat64WithUnit:
+		return func(b []byte, o binary.ByteOrder) any { return interpretFloat64(b, o) }, nil
+	case DataTypeFloat128, DataTypeFloat128WithUnit:
+		return func(b []byte, o binary.ByteOrder) any { return interpretFloat128(b, o) }, nil
+	case DataTypeString:
+		return func(b []byte, o binary.ByteOrder) any { return interpretString(b, o) }, nil
+	case DataTypeBool:
+		return func(b []byte, o binary.ByteOrder) any { return interpretBool(b, o) }, nil
+	case DataTypeTimestamp:
+		return func(b []byte, o binary.ByteOrder) any { return interpretTimestamp(b, o) }, nil
+	case DataTypeComplex64:
+		return func(b []byte, o binary.ByteOrder) any { return interpretComplex64(b, o) }, nil
+	case DataTypeComplex128:
+		return func(b []byte, o binary.ByteOrder) any { return interpretComplex128(b, o) }, nil
+	default:
+		return nil, fmt.Errorf("%w: data type %d", ErrUnsupportedType, dataType)
 	}
 }

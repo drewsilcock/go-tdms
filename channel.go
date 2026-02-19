@@ -127,6 +127,36 @@ func ForDAQmxScaler(daqmxScaleIndex int) ReadOption {
 	}
 }
 
+func (ch *Channel) DataType(options ...ReadOption) (DataType, error) {
+	opts := renderReadOptions(options)
+
+	dataType := ch.RawDataType
+
+	if opts.shouldScale {
+		dataType = ch.ScaledDataType
+	}
+
+	// For DAQmx raw data with scaling disabled, use the DAQmx scaler's data type
+	if dataType == DataTypeDAQmxRawData {
+		if opts.daqmxScaleIndex >= len(ch.scaler.scalers) {
+			return DataTypeVoid, fmt.Errorf("invalid DAQmx scale index: %d", opts.daqmxScaleIndex)
+		}
+
+		daqmxScaler, ok := ch.scaler.scalers[opts.daqmxScaleIndex].(*DAQmxScaler)
+		if !ok {
+			return DataTypeVoid, fmt.Errorf("expected DAQmx scaler, got %T", ch.scaler.scalers[opts.daqmxScaleIndex])
+		}
+
+		var err error
+		dataType, err = daqmxScaler.OutputType(nil)
+		if err != nil {
+			return DataTypeVoid, fmt.Errorf("failed to get DAQmx scaler output type: %w", err)
+		}
+	}
+
+	return dataType, nil
+}
+
 // Data streaming functions that yield each item at a time.
 
 func (ch *Channel) Read(options ...ReadOption) iter.Seq2[any, error] {
@@ -236,9 +266,11 @@ func (ch *Channel) ReadComplex128(options ...ReadOption) iter.Seq2[complex128, e
 func (ch *Channel) ReadBatch(options ...ReadOption) iter.Seq2[any, error] {
 	// This one is a bit different because we don't want to return []any, we
 	// want to return an any that can be []int8, []int16, etc.
-	dataType := ch.RawDataType
-	if renderReadOptions(options).shouldScale {
-		dataType = ch.ScaledDataType
+	dataType, err := ch.DataType(options...)
+	if err != nil {
+		return func(yield func(any, error) bool) {
+			yield(nil, fmt.Errorf("failed to get channel data type: %w", err))
+		}
 	}
 
 	switch dataType {
@@ -378,9 +410,9 @@ func (ch *Channel) ReadComplex128Batch(options ...ReadOption) iter.Seq2[[]comple
 // Data streaming functions that read all the data for a channel in one go.
 
 func (ch *Channel) ReadAll(options ...ReadOption) (any, error) {
-	dataType := ch.RawDataType
-	if renderReadOptions(options).shouldScale {
-		dataType = ch.ScaledDataType
+	dataType, err := ch.DataType(options...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get channel data type: %w", err)
 	}
 
 	switch dataType {
@@ -592,9 +624,9 @@ func readAllData[T any](ch *Channel, options []ReadOption) ([]T, error) {
 	// set in the channel metadata (i.e. T).
 	var values any
 
-	dataType := ch.RawDataType
-	if renderReadOptions(options).shouldScale {
-		dataType = ch.ScaledDataType
+	dataType, err := ch.DataType(options...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get channel data type: %w", err)
 	}
 
 	switch dataType {
@@ -636,8 +668,20 @@ func readAllData[T any](ch *Channel, options []ReadOption) ([]T, error) {
 
 	var streamer iter.Seq2[any, error]
 
-	// The generic in the stream reader is the raw type, not the output type.
-	switch ch.RawDataType {
+	// The generic in the stream reader is the raw type, not the output type. We
+	// can emulate this by getting the data type and passing in the option to
+	// disable scaling. We need to put the scaling disable option at the end to
+	// overwrite any user-input option that enables it.
+	optionsNoScaling := make([]ReadOption, 0, len(options)+1)
+	optionsNoScaling = append(optionsNoScaling, options...)
+	optionsNoScaling = append(optionsNoScaling, WithScaling(false))
+
+	rawDataType, err := ch.DataType(optionsNoScaling...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get channel raw data type: %w", err)
+	}
+
+	switch rawDataType {
 	case DataTypeInt8:
 		streamer = BatchStreamReader[int8](ch, options)
 	case DataTypeInt16:
@@ -718,43 +762,4 @@ func readAllData[T any](ch *Channel, options []ReadOption) ([]T, error) {
 	}
 
 	return values.([]T), nil
-}
-
-func getInterpreter(dataType DataType) (func([]byte, binary.ByteOrder) any, error) {
-	switch dataType {
-	case DataTypeInt8:
-		return func(b []byte, o binary.ByteOrder) any { return interpretInt8(b, o) }, nil
-	case DataTypeInt16:
-		return func(b []byte, o binary.ByteOrder) any { return interpretInt16(b, o) }, nil
-	case DataTypeInt32:
-		return func(b []byte, o binary.ByteOrder) any { return interpretInt32(b, o) }, nil
-	case DataTypeInt64:
-		return func(b []byte, o binary.ByteOrder) any { return interpretInt64(b, o) }, nil
-	case DataTypeUint8:
-		return func(b []byte, o binary.ByteOrder) any { return interpretUint8(b, o) }, nil
-	case DataTypeUint16:
-		return func(b []byte, o binary.ByteOrder) any { return interpretUint16(b, o) }, nil
-	case DataTypeUint32:
-		return func(b []byte, o binary.ByteOrder) any { return interpretUint32(b, o) }, nil
-	case DataTypeUint64:
-		return func(b []byte, o binary.ByteOrder) any { return interpretUint64(b, o) }, nil
-	case DataTypeFloat32, DataTypeFloat32WithUnit:
-		return func(b []byte, o binary.ByteOrder) any { return interpretFloat32(b, o) }, nil
-	case DataTypeFloat64, DataTypeFloat64WithUnit:
-		return func(b []byte, o binary.ByteOrder) any { return interpretFloat64(b, o) }, nil
-	case DataTypeFloat128, DataTypeFloat128WithUnit:
-		return func(b []byte, o binary.ByteOrder) any { return interpretFloat128(b, o) }, nil
-	case DataTypeString:
-		return func(b []byte, o binary.ByteOrder) any { return interpretString(b, o) }, nil
-	case DataTypeBool:
-		return func(b []byte, o binary.ByteOrder) any { return interpretBool(b, o) }, nil
-	case DataTypeTimestamp:
-		return func(b []byte, o binary.ByteOrder) any { return interpretTimestamp(b, o) }, nil
-	case DataTypeComplex64:
-		return func(b []byte, o binary.ByteOrder) any { return interpretComplex64(b, o) }, nil
-	case DataTypeComplex128:
-		return func(b []byte, o binary.ByteOrder) any { return interpretComplex128(b, o) }, nil
-	default:
-		return nil, fmt.Errorf("%w: data type %d", ErrUnsupportedType, dataType)
-	}
 }

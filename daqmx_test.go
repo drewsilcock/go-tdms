@@ -42,10 +42,10 @@ func (f *testFile) build() []byte {
 		buf.Write(tdmsMagicBytes)
 
 		// TOC
-		binary.Write(&buf, binary.LittleEndian, seg.toc)
+		_ = binary.Write(&buf, binary.LittleEndian, seg.toc)
 
 		// Version
-		binary.Write(&buf, binary.LittleEndian, uint32(4712))
+		_ = binary.Write(&buf, binary.LittleEndian, uint32(4712))
 
 		// Next segment offset and raw data offset
 		// nextSegmentOffset is the offset from the end of the lead-in to the next segment
@@ -53,8 +53,8 @@ func (f *testFile) build() []byte {
 		nextOffset := uint64(len(seg.metadata) + len(seg.rawData))
 		rawDataOffset := uint64(len(seg.metadata))
 
-		binary.Write(&buf, binary.LittleEndian, nextOffset)
-		binary.Write(&buf, binary.LittleEndian, rawDataOffset)
+		_ = binary.Write(&buf, binary.LittleEndian, nextOffset)
+		_ = binary.Write(&buf, binary.LittleEndian, rawDataOffset)
 
 		// Metadata
 		buf.Write(seg.metadata)
@@ -78,15 +78,11 @@ func segmentTOC() uint32 {
 	return tocMetaData | tocRawData | tocNewObjList | tocDAQmxRawData
 }
 
-func segmentTOCNonDAQmx() uint32 {
-	return tocMetaData | tocRawData | tocNewObjList
-}
-
 // Metadata builders
 
 func buildMetadata(numObjects uint32, objects ...[]byte) []byte {
 	var buf bytes.Buffer
-	binary.Write(&buf, binary.LittleEndian, numObjects)
+	_ = binary.Write(&buf, binary.LittleEndian, numObjects)
 	for _, obj := range objects {
 		buf.Write(obj)
 	}
@@ -94,25 +90,25 @@ func buildMetadata(numObjects uint32, objects ...[]byte) []byte {
 }
 
 func rootMetadata() []byte {
-	return objectMetadata("/", 0x00000000, 0)
+	return objectMetadata("/", 0xFFFFFFFF, 0)
 }
 
 func groupMetadata() []byte {
-	return objectMetadata("/'Group'", 0x00000000, 0)
+	return objectMetadata("/'Group'", 0xFFFFFFFF, 0)
 }
 
 func objectMetadata(path string, rawDataIndex uint32, numProps uint32) []byte {
 	var buf bytes.Buffer
 
 	// Path length and path
-	binary.Write(&buf, binary.LittleEndian, uint32(len(path)))
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(len(path)))
 	buf.WriteString(path)
 
 	// Raw data index
-	binary.Write(&buf, binary.LittleEndian, rawDataIndex)
+	_ = binary.Write(&buf, binary.LittleEndian, rawDataIndex)
 
 	// Number of properties
-	binary.Write(&buf, binary.LittleEndian, numProps)
+	_ = binary.Write(&buf, binary.LittleEndian, numProps)
 
 	return buf.Bytes()
 }
@@ -123,31 +119,28 @@ func daqmxChannelMetadata(channelName string, numValues uint64, rawDataWidths []
 	var buf bytes.Buffer
 
 	// Path length and path
-	binary.Write(&buf, binary.LittleEndian, uint32(len(path)))
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(len(path)))
 	buf.WriteString(path)
 
 	// Raw data index (0x1269 for format changing scaler, 0x126A for digital line)
-	isDigital := false
-	if len(scalers) > 0 && len(scalers[0]) == 13 { // Digital line scalers are 13 bytes
-		isDigital = true
-	}
+	isDigital := len(scalers) > 0 && len(scalers[0]) == 13 // Digital line scalers are 13 bytes
 	if isDigital {
-		binary.Write(&buf, binary.LittleEndian, uint32(0x126A))
+		_ = binary.Write(&buf, binary.LittleEndian, uint32(0x126A))
 	} else {
-		binary.Write(&buf, binary.LittleEndian, uint32(0x1269))
+		_ = binary.Write(&buf, binary.LittleEndian, uint32(0x1269))
 	}
 
 	// Data type
-	binary.Write(&buf, binary.LittleEndian, dataType)
+	_ = binary.Write(&buf, binary.LittleEndian, dataType)
 
 	// Array dimension
-	binary.Write(&buf, binary.LittleEndian, uint32(1))
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(1))
 
 	// Number of values
-	binary.Write(&buf, binary.LittleEndian, numValues)
+	_ = binary.Write(&buf, binary.LittleEndian, numValues)
 
 	// Number of scalers
-	binary.Write(&buf, binary.LittleEndian, uint32(len(scalers)))
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(len(scalers)))
 
 	// Scaler metadata
 	for _, scaler := range scalers {
@@ -155,16 +148,24 @@ func daqmxChannelMetadata(channelName string, numValues uint64, rawDataWidths []
 	}
 
 	// Number of raw data widths
-	binary.Write(&buf, binary.LittleEndian, uint32(len(rawDataWidths)))
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(len(rawDataWidths)))
 
 	// Raw data widths
 	for _, width := range rawDataWidths {
-		binary.Write(&buf, binary.LittleEndian, width)
+		_ = binary.Write(&buf, binary.LittleEndian, width)
 	}
 
 	// Properties
+	// Add NI_Number_Of_Scales property if there are scalers
+	if props == nil {
+		props = make(map[string]any)
+	}
+	if len(scalers) > 0 {
+		props["NI_Number_Of_Scales"] = uint32(len(scalers))
+	}
+
 	numProps := uint32(len(props))
-	binary.Write(&buf, binary.LittleEndian, numProps)
+	_ = binary.Write(&buf, binary.LittleEndian, numProps)
 	for name, value := range props {
 		writeProperty(&buf, name, value)
 	}
@@ -174,17 +175,17 @@ func daqmxChannelMetadata(channelName string, numValues uint64, rawDataWidths []
 
 func writeProperty(buf *bytes.Buffer, name string, value any) {
 	// Property name length and name
-	binary.Write(buf, binary.LittleEndian, uint32(len(name)))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(len(name)))
 	buf.WriteString(name)
 
 	// Property data type and value
 	switch v := value.(type) {
 	case uint32:
-		binary.Write(buf, binary.LittleEndian, uint32(0x03)) // tdsTypeU32
-		binary.Write(buf, binary.LittleEndian, v)
+		_ = binary.Write(buf, binary.LittleEndian, uint32(0x03)) // tdsTypeU32
+		_ = binary.Write(buf, binary.LittleEndian, v)
 	case int32:
-		binary.Write(buf, binary.LittleEndian, uint32(0x05)) // tdsTypeI32
-		binary.Write(buf, binary.LittleEndian, v)
+		_ = binary.Write(buf, binary.LittleEndian, uint32(0x05)) // tdsTypeI32
+		_ = binary.Write(buf, binary.LittleEndian, v)
 	default:
 		panic(fmt.Sprintf("unsupported property type: %T", value))
 	}
@@ -194,19 +195,19 @@ func daqmxScalerMetadata(scaleID, dataType, byteOffset, rawBufferIndex uint32) [
 	var buf bytes.Buffer
 
 	// DAQmx data type
-	binary.Write(&buf, binary.LittleEndian, dataType)
+	_ = binary.Write(&buf, binary.LittleEndian, dataType)
 
 	// Raw buffer index
-	binary.Write(&buf, binary.LittleEndian, rawBufferIndex)
+	_ = binary.Write(&buf, binary.LittleEndian, rawBufferIndex)
 
 	// Raw byte offset
-	binary.Write(&buf, binary.LittleEndian, byteOffset)
+	_ = binary.Write(&buf, binary.LittleEndian, byteOffset)
 
 	// Sample format bitmap (unknown purpose)
-	binary.Write(&buf, binary.LittleEndian, uint32(0))
+	_ = binary.Write(&buf, binary.LittleEndian, uint32(0))
 
 	// Scale ID
-	binary.Write(&buf, binary.LittleEndian, scaleID)
+	_ = binary.Write(&buf, binary.LittleEndian, scaleID)
 
 	return buf.Bytes()
 }
@@ -215,19 +216,19 @@ func digitalScalerMetadata(scaleID, dataType, bitOffset, rawBufferIndex uint32) 
 	var buf bytes.Buffer
 
 	// DAQmx data type
-	binary.Write(&buf, binary.LittleEndian, dataType)
+	_ = binary.Write(&buf, binary.LittleEndian, dataType)
 
 	// Raw buffer index
-	binary.Write(&buf, binary.LittleEndian, rawBufferIndex)
+	_ = binary.Write(&buf, binary.LittleEndian, rawBufferIndex)
 
 	// Raw bit offset
-	binary.Write(&buf, binary.LittleEndian, bitOffset)
+	_ = binary.Write(&buf, binary.LittleEndian, bitOffset)
 
 	// Sample format bitmap (1 byte for digital)
 	buf.WriteByte(0)
 
 	// Scale ID
-	binary.Write(&buf, binary.LittleEndian, scaleID)
+	_ = binary.Write(&buf, binary.LittleEndian, scaleID)
 
 	return buf.Bytes()
 }
@@ -241,14 +242,14 @@ func hexToBytes(hexStr string) []byte {
 
 	result := make([]byte, len(hexStr)/2)
 	for i := range result {
-		fmt.Sscanf(hexStr[i*2:i*2+2], "%02x", &result[i])
+		_, _ = fmt.Sscanf(hexStr[i*2:i*2+2], "%02x", &result[i])
 	}
 	return result
 }
 
 // Actual tests
 
-func TestSingleChannelInt16(t *testing.T) {
+func TestDAQmxSingleChannelInt16(t *testing.T) {
 	scalerMeta := daqmxScalerMetadata(0, 3, 0, 0) // scale_id=0, type=Int16, offset=0, buffer=0
 
 	metadata := buildMetadata(3,
@@ -290,7 +291,7 @@ func TestSingleChannelInt16(t *testing.T) {
 	}
 }
 
-func TestSingleChannelUint16(t *testing.T) {
+func TestDAQmxSingleChannelUint16(t *testing.T) {
 	scalerMeta := daqmxScalerMetadata(0, 2, 0, 0) // type=Uint16
 
 	metadata := buildMetadata(3,
@@ -330,7 +331,7 @@ func TestSingleChannelUint16(t *testing.T) {
 	}
 }
 
-func TestSingleChannelInt32(t *testing.T) {
+func TestDAQmxSingleChannelInt32(t *testing.T) {
 	scalerMeta := daqmxScalerMetadata(0, 5, 0, 0) // type=Int32
 
 	metadata := buildMetadata(3,
@@ -370,7 +371,7 @@ func TestSingleChannelInt32(t *testing.T) {
 	}
 }
 
-func TestSingleChannelUint32(t *testing.T) {
+func TestDAQmxSingleChannelUint32(t *testing.T) {
 	scalerMeta := daqmxScalerMetadata(0, 4, 0, 0) // type=Uint32
 
 	metadata := buildMetadata(3,
@@ -410,7 +411,7 @@ func TestSingleChannelUint32(t *testing.T) {
 	}
 }
 
-func TestTwoChannelInt16(t *testing.T) {
+func TestDAQmxTwoChannelInt16(t *testing.T) {
 	scaler1 := daqmxScalerMetadata(0, 3, 0, 0)
 	scaler2 := daqmxScalerMetadata(0, 3, 2, 0)
 
@@ -473,7 +474,7 @@ func TestTwoChannelInt16(t *testing.T) {
 	}
 }
 
-func TestMixedChannelWidths(t *testing.T) {
+func TestDAQmxMixedChannelWidths(t *testing.T) {
 	scaler1 := daqmxScalerMetadata(0, 1, 0, 0) // Int8, offset 0
 	scaler2 := daqmxScalerMetadata(0, 3, 1, 0) // Int16, offset 1
 	scaler3 := daqmxScalerMetadata(0, 5, 3, 0) // Int32, offset 3
@@ -563,7 +564,7 @@ func TestMixedChannelWidths(t *testing.T) {
 	}
 }
 
-func TestMultipleScalersWithSameType(t *testing.T) {
+func TestDAQmxMultipleScalersWithSameType(t *testing.T) {
 	scaler1 := daqmxScalerMetadata(0, 3, 0, 0)
 	scaler2 := daqmxScalerMetadata(1, 3, 2, 0)
 
@@ -622,7 +623,7 @@ func TestMultipleScalersWithSameType(t *testing.T) {
 	}
 }
 
-func TestMultipleRawDataBuffers(t *testing.T) {
+func TestDAQmxMultipleRawDataBuffers(t *testing.T) {
 	scaler1 := daqmxScalerMetadata(0, 3, 0, 0) // Buffer 0, offset 0
 	scaler2 := daqmxScalerMetadata(0, 3, 2, 0) // Buffer 0, offset 2
 	scaler3 := daqmxScalerMetadata(0, 3, 0, 1) // Buffer 1, offset 0
@@ -686,7 +687,7 @@ func TestMultipleRawDataBuffers(t *testing.T) {
 	}
 }
 
-func TestDigitalLineScalerData(t *testing.T) {
+func TestDAQmxDigitalLineScalerData(t *testing.T) {
 	scalerMeta := digitalScalerMetadata(0, 0, 0, 0) // Digital, bit offset 0
 
 	metadata := buildMetadata(3,
@@ -786,9 +787,3 @@ func getChannel(file *File, groupName, channelName string) (*Channel, error) {
 }
 
 // Helper to compare slices with type checking
-func compareSlice(t *testing.T, name string, got, want any) {
-	t.Helper()
-	if !cmp.Equal(got, want) {
-		t.Errorf("%s mismatch:\n%s", name, cmp.Diff(want, got))
-	}
-}
