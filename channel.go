@@ -556,37 +556,37 @@ func convertBatchStream[T any](ch *Channel, options []ReadOption) iter.Seq2[[]T,
 		// The generic in the stream reader is the raw type, not the output type.
 		switch ch.RawDataType {
 		case DataTypeInt8:
-			streamer = BatchStreamReader[int8](ch, options)
+			streamer = batchStreamReader[int8](ch, options)
 		case DataTypeInt16:
-			streamer = BatchStreamReader[int16](ch, options)
+			streamer = batchStreamReader[int16](ch, options)
 		case DataTypeInt32:
-			streamer = BatchStreamReader[int32](ch, options)
+			streamer = batchStreamReader[int32](ch, options)
 		case DataTypeInt64:
-			streamer = BatchStreamReader[int64](ch, options)
+			streamer = batchStreamReader[int64](ch, options)
 		case DataTypeUint8:
-			streamer = BatchStreamReader[uint8](ch, options)
+			streamer = batchStreamReader[uint8](ch, options)
 		case DataTypeUint16:
-			streamer = BatchStreamReader[uint16](ch, options)
+			streamer = batchStreamReader[uint16](ch, options)
 		case DataTypeUint32:
-			streamer = BatchStreamReader[uint32](ch, options)
+			streamer = batchStreamReader[uint32](ch, options)
 		case DataTypeUint64:
-			streamer = BatchStreamReader[uint64](ch, options)
+			streamer = batchStreamReader[uint64](ch, options)
 		case DataTypeFloat32:
-			streamer = BatchStreamReader[float32](ch, options)
+			streamer = batchStreamReader[float32](ch, options)
 		case DataTypeFloat64:
-			streamer = BatchStreamReader[float64](ch, options)
+			streamer = batchStreamReader[float64](ch, options)
 		case DataTypeFloat128:
-			streamer = BatchStreamReader[Float128](ch, options)
+			streamer = batchStreamReader[Float128](ch, options)
 		case DataTypeString:
-			streamer = BatchStreamReader[string](ch, options)
+			streamer = batchStreamReader[string](ch, options)
 		case DataTypeBool:
-			streamer = BatchStreamReader[bool](ch, options)
+			streamer = batchStreamReader[bool](ch, options)
 		case DataTypeTimestamp:
-			streamer = BatchStreamReader[Timestamp](ch, options)
+			streamer = batchStreamReader[Timestamp](ch, options)
 		case DataTypeComplex64:
-			streamer = BatchStreamReader[complex64](ch, options)
+			streamer = batchStreamReader[complex64](ch, options)
 		case DataTypeComplex128:
-			streamer = BatchStreamReader[complex128](ch, options)
+			streamer = batchStreamReader[complex128](ch, options)
 		default:
 			yield(nil, ErrUnsupportedType)
 			return
@@ -684,37 +684,37 @@ func readAllData[T any](ch *Channel, options []ReadOption) ([]T, error) {
 
 	switch rawDataType {
 	case DataTypeInt8:
-		streamer = BatchStreamReader[int8](ch, options)
+		streamer = batchStreamReader[int8](ch, options)
 	case DataTypeInt16:
-		streamer = BatchStreamReader[int16](ch, options)
+		streamer = batchStreamReader[int16](ch, options)
 	case DataTypeInt32:
-		streamer = BatchStreamReader[int32](ch, options)
+		streamer = batchStreamReader[int32](ch, options)
 	case DataTypeInt64:
-		streamer = BatchStreamReader[int64](ch, options)
+		streamer = batchStreamReader[int64](ch, options)
 	case DataTypeUint8:
-		streamer = BatchStreamReader[uint8](ch, options)
+		streamer = batchStreamReader[uint8](ch, options)
 	case DataTypeUint16:
-		streamer = BatchStreamReader[uint16](ch, options)
+		streamer = batchStreamReader[uint16](ch, options)
 	case DataTypeUint32:
-		streamer = BatchStreamReader[uint32](ch, options)
+		streamer = batchStreamReader[uint32](ch, options)
 	case DataTypeUint64:
-		streamer = BatchStreamReader[uint64](ch, options)
+		streamer = batchStreamReader[uint64](ch, options)
 	case DataTypeFloat32:
-		streamer = BatchStreamReader[float32](ch, options)
+		streamer = batchStreamReader[float32](ch, options)
 	case DataTypeFloat64:
-		streamer = BatchStreamReader[float64](ch, options)
+		streamer = batchStreamReader[float64](ch, options)
 	case DataTypeFloat128:
-		streamer = BatchStreamReader[Float128](ch, options)
+		streamer = batchStreamReader[Float128](ch, options)
 	case DataTypeString:
-		streamer = BatchStreamReader[string](ch, options)
+		streamer = batchStreamReader[string](ch, options)
 	case DataTypeBool:
-		streamer = BatchStreamReader[bool](ch, options)
+		streamer = batchStreamReader[bool](ch, options)
 	case DataTypeTimestamp:
-		streamer = BatchStreamReader[Timestamp](ch, options)
+		streamer = batchStreamReader[Timestamp](ch, options)
 	case DataTypeComplex64:
-		streamer = BatchStreamReader[complex64](ch, options)
+		streamer = batchStreamReader[complex64](ch, options)
 	case DataTypeComplex128:
-		streamer = BatchStreamReader[complex128](ch, options)
+		streamer = batchStreamReader[complex128](ch, options)
 	default:
 		return nil, ErrUnsupportedType
 	}

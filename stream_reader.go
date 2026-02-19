@@ -15,7 +15,7 @@ import (
 	"iter"
 )
 
-// BatchStreamReader returns an iterator that yields batches of values from the
+// batchStreamReader returns an iterator that yields batches of values from the
 // channel. Each batch is a slice of values read from the underlying file. Use
 // the [BatchSize] option to control how many values are read in each batch.
 //
@@ -23,7 +23,7 @@ import (
 // allocations. If you need to retain batch data beyond the current iteration,
 // you must copy it to your own buffer. For reading all data into a single
 // slice, use the ReadData*All methods on [Channel] instead.
-func BatchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[any, error] {
+func batchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[any, error] {
 	return func(yield func(any, error) bool) {
 		opts := renderReadOptions(options)
 
