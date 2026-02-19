@@ -103,11 +103,11 @@ func (dt DataType) Size() int {
 		return 1
 	case DataTypeInt16, DataTypeUint16:
 		return 2
-	case DataTypeInt32, DataTypeUint32, DataTypeFloat32:
+	case DataTypeInt32, DataTypeUint32, DataTypeFloat32, DataTypeFloat32WithUnit:
 		return 4
-	case DataTypeInt64, DataTypeUint64, DataTypeFloat64, DataTypeComplex64:
+	case DataTypeInt64, DataTypeUint64, DataTypeFloat64, DataTypeFloat64WithUnit, DataTypeComplex64:
 		return 8
-	case DataTypeFloat128, DataTypeComplex128, DataTypeTimestamp:
+	case DataTypeFloat128, DataTypeFloat128WithUnit, DataTypeComplex128, DataTypeTimestamp:
 		return 16
 	default:
 		return 0
@@ -143,10 +143,16 @@ func (dt DataType) Name() string {
 		return "Uint64"
 	case DataTypeFloat32:
 		return "Float32"
+	case DataTypeFloat32WithUnit:
+		return "Float32WithUnit"
 	case DataTypeFloat64:
 		return "Float64"
-	case DataTypeFloat128, DataTypeFloat128WithUnit:
+	case DataTypeFloat64WithUnit:
+		return "Float64WithUnit"
+	case DataTypeFloat128:
 		return "Float128"
+	case DataTypeFloat128WithUnit:
+		return "Float128WithUnit"
 	case DataTypeString:
 		return "String"
 	case DataTypeBool:
