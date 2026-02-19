@@ -2,10 +2,6 @@ package tdms
 
 import "fmt"
 
-func ptr[T any](value T) *T {
-	return &value
-}
-
 func allocateBuffer(dataType DataType, size int) (any, error) {
 	switch dataType {
 	case DataTypeInt8:
@@ -125,4 +121,48 @@ func sliceBuffer(buffer any, from, to int) any {
 	default:
 		panic("unsupported buffer type")
 	}
+}
+
+// copySlice copies from input to output slice.
+//
+// Will panic if the output slice is not of the same type as the input type.
+func copySlice(from, to any) error {
+	switch f := from.(type) {
+	case []int8:
+		copy(to.([]int8), f)
+	case []int16:
+		copy(to.([]int16), f)
+	case []int32:
+		copy(to.([]int32), f)
+	case []int64:
+		copy(to.([]int64), f)
+	case []uint8:
+		copy(to.([]uint8), f)
+	case []uint16:
+		copy(to.([]uint16), f)
+	case []uint32:
+		copy(to.([]uint32), f)
+	case []uint64:
+		copy(to.([]uint64), f)
+	case []float32:
+		copy(to.([]float32), f)
+	case []float64:
+		copy(to.([]float64), f)
+	case []Float128:
+		copy(to.([]Float128), f)
+	case []complex64:
+		copy(to.([]complex64), f)
+	case []complex128:
+		copy(to.([]complex128), f)
+	case []bool:
+		copy(to.([]bool), f)
+	case []string:
+		copy(to.([]string), f)
+	case []Timestamp:
+		copy(to.([]Timestamp), f)
+	default:
+		return fmt.Errorf("%w: %T", ErrUnsupportedType, from)
+	}
+
+	return nil
 }

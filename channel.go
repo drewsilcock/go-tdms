@@ -53,12 +53,15 @@ type Channel struct {
 // to make reading simpler and to keep all the necessary information self-contained.
 type dataChunk struct {
 	// offset is absolute from the start of the file
-	offset        int64
-	isInterleaved bool
-	order         binary.ByteOrder
-	size          uint64
-	numValues     uint64
-	stride        int64
+	offset            int64
+	isInterleaved     bool
+	isDAQmx           bool
+	order             binary.ByteOrder
+	size              uint64
+	numValues         uint64
+	stride            int64
+	daqMXBufferWidths []uint32
+	daqMXBufferSizes  []uint64
 }
 
 // NumValues returns the total number of data values in this channel across all
@@ -68,14 +71,16 @@ func (ch *Channel) NumValues() uint64 {
 }
 
 type readOptions struct {
-	batchSize   int
-	shouldScale bool
+	batchSize       int
+	shouldScale     bool
+	daqmxScaleIndex int
 }
 
 func renderReadOptions(options []ReadOption) readOptions {
 	opts := readOptions{
-		batchSize:   0,
-		shouldScale: true,
+		batchSize:       0,
+		shouldScale:     true,
+		daqmxScaleIndex: 0,
 	}
 
 	for _, opt := range options {
@@ -102,6 +107,10 @@ func BatchSize(batchSize int) ReadOption {
 //
 // If [WithScaling] is not specified as an option, streaming will default to
 // applying scaling.
+//
+// DAQmx scalers are required to understand the raw data and do not perform
+// mathematical transformations in the way that the other scalers do, so
+// disabling scaling when reading DAQmx data has no effect.
 func WithScaling(shouldScale ...bool) ReadOption {
 	return func(opts *readOptions) {
 		if len(shouldScale) > 0 {
@@ -109,6 +118,12 @@ func WithScaling(shouldScale ...bool) ReadOption {
 		} else {
 			opts.shouldScale = true
 		}
+	}
+}
+
+func ForDAQmxScaler(daqmxScaleIndex int) ReadOption {
+	return func(opts *readOptions) {
+		opts.daqmxScaleIndex = daqmxScaleIndex
 	}
 }
 

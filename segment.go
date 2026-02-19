@@ -66,6 +66,12 @@ var (
 	tdmsIndexMagicBytes = []byte{'T', 'D', 'S', 'h'}
 )
 
+const (
+	maxSupportedScalers      = 10_000
+	maxSupportedDAQmxBuffers = 10_000
+	maxSupportedProperties   = 100_000
+)
+
 // segment contains an individual section of the TDMS file, of which a TDMS file
 // consists of one or more. Each segment has it's own lead in, optionally with
 // metadata and raw data.
@@ -98,6 +104,14 @@ type metadata struct {
 	// of data (either interleaved or non-interleaved) one after the other.
 	numChunks uint64
 	chunkSize uint64
+
+	// daqmxBufferSizes is the total size in bytes of each buffer.
+	// This is equivalent to daqmxBufferWidths found in the DAQmx object raw
+	// data index, where each value is multiplied by the number of values in
+	// that buffer. You need to look at the scalers to see how many values are
+	// in each buffer, which is why we introduce this helpful pre-calculated
+	// slice.
+	daqmxBufferSizes []uint64
 }
 
 type object struct {
@@ -122,7 +136,7 @@ type objectIndex struct {
 	totalSize uint64
 
 	// daqmxScalers maps from scaler index to scaler.
-	daqmxScalers map[int]daqmxScaler
+	daqmxScalers map[int]DAQmxScaler
 
 	// daqmxBufferWidths is the size of a single sample for each DAQmx buffer in
 	// bytes. These widths are the same across all objects in the segment but
@@ -302,6 +316,7 @@ func (t *File) readSegmentMetadata(segmentOffset int64, leadIn *leadIn, prevSegm
 	// Calculate the number of chunks based on the next segment offset and
 	// the total size of each chunk.
 	m.chunkSize = 0
+
 	for _, obj := range m.objects {
 		if obj.index != nil {
 			m.chunkSize += obj.index.totalSize
@@ -357,6 +372,10 @@ func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error)
 		obj.index = nil
 		rawDataIndexPresent = false
 	case rawIndexHeaderMatchesPreviousValue:
+		if prevSegment == nil {
+			return nil, errors.New("raw data index matches previous value but no prior segment found")
+		}
+
 		if existingObj, ok := prevSegment.metadata.objects[obj.path]; ok {
 			// We don't bother copying the index because we won't change it.
 			obj.index = existingObj.index
@@ -414,7 +433,7 @@ func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error)
 			// The total size is only present when the data size is variable,
 			// e.g. is a string. I can't see any other variable size data types,
 			// although I am not sure about FixedPointer and DAQmx data.
-			if obj.index.dataType == DataTypeString {
+			if obj.index.dataType.Size() == 0 {
 				obj.index.totalSize, err = readUint64(t.r, leadIn.byteOrder)
 				if err != nil {
 					return nil, errors.Join(ErrReadFailed, err)
@@ -428,7 +447,12 @@ func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error)
 				return nil, errors.Join(ErrReadFailed, err)
 			}
 
-			obj.index.daqmxScalers = make(map[int]daqmxScaler, numScalers)
+			// If you've got thousands of scalers, it means your data is corrupted.
+			if numScalers > maxSupportedScalers {
+				return nil, fmt.Errorf("%w: unsupported number of DAQmx scalers: %d", ErrInvalidFileFormat, numScalers)
+			}
+
+			obj.index.daqmxScalers = make(map[int]DAQmxScaler, numScalers)
 
 			// All the scalers all have the same type.
 			daqmxScalerSize := daqmxFormatChangingScalerSize
@@ -449,7 +473,7 @@ func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error)
 				// line scaler. Between the 2, I trust npTDMS more on this.
 				scalerBytes := scalersBytes[i*daqmxScalerSize : (i+1)*daqmxScalerSize]
 
-				scaler := daqmxScaler{}
+				scaler := DAQmxScaler{}
 				scaler.dataType = DAQmxDataType(leadIn.byteOrder.Uint32(scalerBytes))
 				scaler.rawBufferIndex = leadIn.byteOrder.Uint32(scalerBytes[4:8])
 				scaler.offsetWithinStride = leadIn.byteOrder.Uint32(scalerBytes[8:12])
@@ -470,6 +494,10 @@ func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error)
 				return nil, errors.Join(ErrReadFailed, err)
 			}
 
+			if numBufferWidths > maxSupportedDAQmxBuffers {
+				return nil, fmt.Errorf("%w: unsupported number of buffer widths: %d", ErrInvalidFileFormat, numBufferWidths)
+			}
+
 			obj.index.daqmxBufferWidths = make([]uint32, numBufferWidths)
 
 			widthsBytes := make([]byte, 4*numBufferWidths)
@@ -483,12 +511,21 @@ func (t *File) readObject(leadIn *leadIn, prevSegment *segment) (*object, error)
 			for i := range numBufferWidths {
 				obj.index.daqmxBufferWidths[i] = leadIn.byteOrder.Uint32(widthsBytes[i*4:])
 			}
+
+			obj.index.totalSize = 0
+			for _, scaler := range obj.index.daqmxScalers {
+				obj.index.totalSize += uint64(scaler.dataType.Size()) * obj.index.numValues
+			}
 		}
 	}
 
 	numProps, err := readUint32(t.r, leadIn.byteOrder)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read number of properties: %w", err)
+	}
+
+	if numProps > maxSupportedProperties {
+		return nil, fmt.Errorf("%w: unsupported number of properties: %d", ErrInvalidFileFormat, numProps)
 	}
 
 	obj.properties = make(map[string]Property, numProps)

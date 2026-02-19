@@ -325,7 +325,7 @@ func toTimestamp(t *testing.T, value any) tdms.Timestamp {
 func TestTDMSFilesFromManifest(t *testing.T) {
 	// Check if test data directory exists
 	if _, err := os.Stat(testDataDir); os.IsNotExist(err) {
-		t.Skipf("Test data directory %s does not exist. Run the Python generator first.", testDataDir)
+		t.Fatalf("Test data directory %s does not exist. Run the Python generator first.", testDataDir)
 	}
 
 	manifest := loadManifest(t, testDataDir)
@@ -337,12 +337,10 @@ func TestTDMSFilesFromManifest(t *testing.T) {
 
 			filePath := filepath.Join(testDataDir, tc.Filename)
 
-			// Skip if file doesn't exist
 			if _, err := os.Stat(filePath); os.IsNotExist(err) {
-				t.Skipf("Test file %s does not exist", tc.Filename)
+				t.Fatalf("Test file %s does not exist", tc.Filename)
 			}
 
-			// Open the TDMS file
 			f, err := tdms.Open(filePath)
 			if err != nil {
 				t.Fatalf("Failed to open TDMS file %s: %v", tc.Filename, err)
@@ -351,7 +349,6 @@ func TestTDMSFilesFromManifest(t *testing.T) {
 				_ = f.Close()
 			}(f)
 
-			// Run sub-tests
 			t.Run("Groups", func(t *testing.T) {
 				testGroups(t, f, tc)
 			})

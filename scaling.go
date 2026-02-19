@@ -37,11 +37,11 @@ import (
 //   - https://www.ni.com/docs/en-US/bundle/labwindows-cvi/page/cvi/libref/cvitdmslibraryfunctiontree.htm
 //   - https://www.ni.com/docs/en-US/bundle/labview-api-ref/page/vi-lib/utility/tdmsutil-llb/tdms-create-scaling-information-vi.html
 
-type Numeric interface {
-	~int8 | ~int16 | ~int32 | ~int64 |
-		~uint8 | ~uint16 | ~uint32 | ~uint64 |
-		~float32 | ~float64
+type Integer interface {
+	int8 | int16 | int32 | int64 | uint8 | uint16 | uint32 | uint64
 }
+
+type Numeric interface{ Integer | float32 | float64 }
 
 type NumericOrComplex interface {
 	Numeric | complex64 | complex128
@@ -162,44 +162,7 @@ func (s *NoOpScaler) OutputType(inputTypes []DataType) (DataType, error) {
 }
 
 func (s *NoOpScaler) Scale(inputs []any, output any) error {
-	// Just copy from input to output.
-
-	switch v := inputs[0].(type) {
-	case []int8:
-		copy(output.([]int8), v)
-	case []int16:
-		copy(output.([]int16), v)
-	case []int32:
-		copy(output.([]int32), v)
-	case []int64:
-		copy(output.([]int64), v)
-	case []uint8:
-		copy(output.([]uint8), v)
-	case []uint16:
-		copy(output.([]uint16), v)
-	case []uint32:
-		copy(output.([]uint32), v)
-	case []uint64:
-		copy(output.([]uint64), v)
-	case []float32:
-		copy(output.([]float32), v)
-	case []float64:
-		copy(output.([]float64), v)
-	case []Float128:
-		copy(output.([]Float128), v)
-	case []complex64:
-		copy(output.([]complex64), v)
-	case []complex128:
-		copy(output.([]complex128), v)
-	case []bool:
-		copy(output.([]bool), v)
-	case []string:
-		copy(output.([]string), v)
-	case []Timestamp:
-		copy(output.([]Timestamp), v)
-	}
-
-	return nil
+	return copySlice(inputs[0], output)
 }
 
 type LinearScaler struct {
@@ -1406,15 +1369,7 @@ func getObjectScaler(obj *object, dataType DataType) (*Multiscaler, error) {
 				)
 			}
 
-			switch obj.index.daqmxScalerType {
-			case daqmxScalerTypeFormatChanging:
-				scalers[scaleIndex] = ptr(formatChangingScaler(scaler))
-			case daqmxScalerTypeDigitalLine:
-				scalers[scaleIndex] = ptr(digitalLineScaler(scaler))
-			default:
-				return nil, fmt.Errorf("unsupported DAQmx scaler type: %d", obj.index.daqmxScalerType)
-			}
-
+			scalers[scaleIndex] = &scaler
 			continue
 		}
 

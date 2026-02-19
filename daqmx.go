@@ -1,5 +1,9 @@
 package tdms
 
+import (
+	"fmt"
+)
+
 // DAQmx data is a variable-width interleaved vector data format which contains
 // multiple internal data streams, each of which can have one of these types.
 //
@@ -47,6 +51,23 @@ const (
 	DAQmxDataTypeTimestamp DAQmxDataType = 0xffffffff
 )
 
+func (dt DAQmxDataType) Size() int {
+	switch dt {
+	case DAQmxDataTypeUint8, DAQmxDataTypeInt8:
+		return 1
+	case DAQmxDataTypeUint16, DAQmxDataTypeInt16:
+		return 2
+	case DAQmxDataTypeUint32, DAQmxDataTypeInt32, DAQmxDataTypeFloat32:
+		return 4
+	case DAQmxDataTypeUint64, DAQmxDataTypeInt64, DAQmxDataTypeFloat64:
+		return 8
+	case DAQmxDataTypeTimestamp:
+		return 16
+	default:
+		return 0
+	}
+}
+
 type daqmxScalerType int
 
 const (
@@ -65,7 +86,7 @@ const (
 // the data in its entirety before the next buffer appears (i.e. buffers are not
 // themselves interleaved).
 
-type daqmxScaler struct {
+type DAQmxScaler struct {
 	// Format changing scaler essentially means "no-op" while digital line
 	// scaler means the values are stored inside specific bits of the underlying
 	// DAQmx data stream bytes.
@@ -79,7 +100,7 @@ type daqmxScaler struct {
 	// data from.
 	rawBufferIndex uint32
 
-	// This is the offset into the
+	// This is the offset into the buffer that the data for this scaler is found.
 	// For format changing, this is bytes. For digital line, this is bits.
 	offsetWithinStride uint32
 
@@ -95,42 +116,82 @@ type daqmxScaler struct {
 	scaleID uint32
 }
 
-type formatChangingScaler daqmxScaler
-
-func (s *formatChangingScaler) ReadProperties(_props Properties, _scaleIndex int) error {
+func (s *DAQmxScaler) ReadProperties(_props Properties, _scaleIndex int) error {
 	// DAQmx scalers read data from object raw data index, not properties.
 	return nil
 }
 
-func (s *formatChangingScaler) InputSources() []int {
+func (s *DAQmxScaler) InputSources() []int {
+	return []int{int(s.scaleID)}
+}
+
+func (s *DAQmxScaler) OutputType(_inputTypes []DataType) (DataType, error) {
+	switch s.dataType {
+	case DAQmxDataTypeInt8:
+		return DataTypeInt8, nil
+	case DAQmxDataTypeInt16:
+		return DataTypeInt16, nil
+	case DAQmxDataTypeInt32:
+		return DataTypeInt32, nil
+	case DAQmxDataTypeInt64:
+		return DataTypeInt64, nil
+	case DAQmxDataTypeUint8:
+		return DataTypeUint8, nil
+	case DAQmxDataTypeUint16:
+		return DataTypeUint16, nil
+	case DAQmxDataTypeUint32:
+		return DataTypeUint32, nil
+	case DAQmxDataTypeUint64:
+		return DataTypeUint64, nil
+	case DAQmxDataTypeFloat32:
+		return DataTypeFloat32, nil
+	case DAQmxDataTypeFloat64:
+		return DataTypeFloat64, nil
+	case DAQmxDataTypeTimestamp:
+		return DataTypeTimestamp, nil
+	default:
+		return DataTypeVoid, fmt.Errorf("unsupported DAQmx data type: %d", s.dataType)
+	}
+}
+
+func (s *DAQmxScaler) Scale(inputs []any, output any) error {
+	if s.scalerType == daqmxScalerTypeFormatChanging {
+		return copySlice(inputs[0], output)
+	}
+
+	// For digital line scaler, we need to extract the specific individual bit
+	// from the wider data.
+	switch v := inputs[0].(type) {
+	case []int8:
+		scaleDigitalLine(s, v, output.([]int8))
+	case []int16:
+		scaleDigitalLine(s, v, output.([]int16))
+	case []int32:
+		scaleDigitalLine(s, v, output.([]int32))
+	case []int64:
+		scaleDigitalLine(s, v, output.([]int64))
+	case []uint8:
+		scaleDigitalLine(s, v, output.([]uint8))
+	case []uint16:
+		scaleDigitalLine(s, v, output.([]uint16))
+	case []uint32:
+		scaleDigitalLine(s, v, output.([]uint32))
+	case []uint64:
+		scaleDigitalLine(s, v, output.([]uint64))
+	default:
+		return fmt.Errorf("%w: %T", ErrUnsupportedType, v)
+	}
+
 	return nil
 }
 
-func (s *formatChangingScaler) OutputType(inputTypes []DataType) (DataType, error) {
-	return DataTypeVoid, nil
-}
+func scaleDigitalLine[T Integer](s *DAQmxScaler, values []T, out []T) {
+	// It's not clear whether it's a valid thing to use a digital line scaler
+	// for any data type other than uint8.
+	offset := s.offsetWithinStride % 8
+	mask := T(1 << offset)
 
-func (s *formatChangingScaler) Scale(inputs []any, output any) error {
-	// TODO: Figure out how to represent this.
-	return nil
-}
-
-type digitalLineScaler daqmxScaler
-
-func (s *digitalLineScaler) InputSources() []int {
-	return nil
-}
-
-func (s *digitalLineScaler) OutputType(inputTypes []DataType) (DataType, error) {
-	return DataTypeVoid, nil
-}
-
-func (s *digitalLineScaler) ReadProperties(_props Properties, _scaleIndex int) error {
-	// DAQmx scalers read data from object raw data index, not properties.
-	return nil
-}
-
-func (s *digitalLineScaler) Scale(inputs []any, output any) error {
-	// TODO: Figure out how to represent this.
-	return nil
+	for i := range out {
+		out[i] = values[i] & mask >> offset
+	}
 }

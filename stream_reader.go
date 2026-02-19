@@ -45,13 +45,33 @@ func BatchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[an
 		// If we have fewer data points in total than a single batch size, we
 		// can allocate only what we need.
 		batchSize := min(opts.batchSize, int(ch.totalNumValues))
+
+		var daqmxScaler *DAQmxScaler
+		if ch.RawDataType == DataTypeDAQmxRawData {
+			if opts.daqmxScaleIndex >= len(ch.scaler.scalers) {
+				yield(nil, fmt.Errorf("invalid DAQmx scale index: %d", opts.daqmxScaleIndex))
+				return
+			}
+
+			var ok bool
+			daqmxScaler, ok = ch.scaler.scalers[opts.daqmxScaleIndex].(*DAQmxScaler)
+			if !ok {
+				yield(nil, fmt.Errorf("expected DAQmx scaler, got %T", daqmxScaler))
+				return
+			}
+		}
+
 		dataSize := ch.RawDataType.Size()
+		if ch.RawDataType == DataTypeDAQmxRawData {
+			dataSize = daqmxScaler.dataType.Size()
+		}
 
 		scaler, _ := NewMultiscaler(ch.RawDataType, nil)
 		if opts.shouldScale {
 			scaler = ch.scaler
 			if err := scaler.Allocate(batchSize); err != nil {
 				yield(nil, fmt.Errorf("failed to allocate scaler for channel %s: %w", ch.Name, err))
+				return
 			}
 		}
 
@@ -62,7 +82,7 @@ func BatchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[an
 
 		for _, chunk := range ch.dataChunks {
 			if _, err := r.Seek(chunk.offset, io.SeekStart); err != nil {
-				yield(nil, err)
+				yield(nil, fmt.Errorf("failed to seek chunk %d: %w", chunk.offset, err))
 				return
 			}
 
@@ -75,7 +95,7 @@ func BatchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[an
 				strOffsetsBytes := make([]byte, chunk.numValues*4)
 				n, err := r.Read(strOffsetsBytes)
 				if err != nil {
-					yield(nil, err)
+					yield(nil, fmt.Errorf("failed to read chunk %d string offsets: %w", chunk.offset, err))
 					return
 				}
 				bytesRead += uint64(n)
@@ -89,9 +109,16 @@ func BatchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[an
 			// we're processing so that we can get the offset for that value.
 			valuesProcessed := 0
 
+			desiredSize := chunk.size
+			if chunk.isDAQmx {
+				// For DAQmx, we want to read to the end of the buffer that the
+				// specified scaler is in, not the whole chunk.
+				desiredSize = uint64(chunk.daqMXBufferSizes[daqmxScaler.rawBufferIndex])
+			}
+
 			for {
 				// We don't want to read past the end of the chunk.
-				bytesLeft := chunk.size - bytesRead
+				bytesLeft := desiredSize - bytesRead
 				if bytesLeft <= 0 {
 					break
 				}
@@ -129,7 +156,45 @@ func BatchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[an
 
 				n := 0
 				var err error
-				if !chunk.isInterleaved {
+
+				if chunk.isDAQmx {
+					byteOffset := daqmxScaler.offsetWithinStride
+					if daqmxScaler.scalerType == daqmxScalerTypeDigitalLine {
+						// Digital line specifies offset in bits, not bytes.
+						byteOffset = byteOffset / 8
+					}
+
+					stride := int64(chunk.daqMXBufferWidths[daqmxScaler.rawBufferIndex])
+					initialOffset := int64(0)
+					for i := range daqmxScaler.rawBufferIndex {
+						initialOffset += int64(chunk.daqMXBufferSizes[i])
+					}
+					initialOffset += int64(byteOffset)
+
+					// This is very similar to the interleaved reading code – can we unify these code paths?
+					for i := 0; i < len(buf); i += dataSize {
+						if i == 0 {
+							if initialOffset > 0 {
+								if _, err := r.Seek(int64(initialOffset), io.SeekCurrent); err != nil {
+									yield(nil, fmt.Errorf("failed to seek to offset: %w", err))
+									return
+								}
+							}
+						} else {
+							if _, err := r.Seek(stride, io.SeekCurrent); err != nil {
+								yield(nil, fmt.Errorf("failed to seek to next value: %w", err))
+								return
+							}
+						}
+
+						readLen, err := r.Read(buf[i : i+dataSize])
+						if err != nil {
+							yield(nil, fmt.Errorf("failed to read data chunk: %w", err))
+							return
+						}
+						n += readLen
+					}
+				} else if !chunk.isInterleaved {
 					n, err = io.ReadFull(r, buf)
 				} else {
 					// You aren't allowed to have interleaved variable-length
@@ -148,34 +213,26 @@ func BatchStreamReader[TRaw any](ch *Channel, options []ReadOption) iter.Seq2[an
 					for i := 0; i < len(buf); i += dataSize {
 						if i > 0 {
 							if _, err := r.Seek(chunk.stride, io.SeekCurrent); err != nil {
-								yield(nil, err)
+								yield(nil, fmt.Errorf("failed to seek to initial offset: %w", err))
 								return
 							}
 						}
 
-						if readLen, err := r.Read(buf[int(i)*dataSize : int(i+1)*dataSize]); err != nil {
-							yield(nil, err)
-							return
-						} else {
-							n += readLen
+						var readLen int
+						readLen, err = r.Read(buf[i : i+dataSize])
+						if err != nil {
+							break
 						}
+						n += readLen
 					}
 				}
 
 				bytesRead += uint64(n)
 
-				// If the final batch doesn't line up with the end of the chunk,
-				// we will get unexpected EOF. If our penultimate batch does
-				// exactly line up with the end of the chunk, we will get EOF
-				// when we try to read the next batch where there's no data
-				// left.
-				if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-					// We've reached the end of the chunk.
+				if errors.Is(err, io.EOF) {
 					break
-				}
-
-				if err != nil {
-					yield(nil, err)
+				} else if err != nil {
+					yield(nil, fmt.Errorf("failed to read data chunk: %w", err))
 					return
 				}
 
