@@ -10,8 +10,6 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
-const batchSize = 1024
-
 var floatOpt = cmpopts.EquateApprox(1e-9, 1e-9)
 
 func TestUnsupportedScalingType(t *testing.T) {
@@ -19,7 +17,7 @@ func TestUnsupportedScalingType(t *testing.T) {
 		Add("NI_Number_Of_Scales", 1).
 		Add("NI_Scale[0]_Scale_Type", "This isn't a valid scaling type")
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err == nil {
 		t.Fatalf("Expected error, got nil")
 	} else if !errors.Is(err, ErrUnsupportedScaler) {
@@ -39,12 +37,25 @@ func TestPrescaledData(t *testing.T) {
 		Add("NI_Scale[0]_Linear_Slope", 2.0).
 		Add("NI_Scale[0]_Linear_Y_Intercept", 10.0)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	got, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
-	if scaler != nil {
-		t.Fatalf("Expected no scaler, got %v", scaler)
+
+	if len(got.scalers) != 0 {
+		t.Fatalf("expected no scalers, got %v", got.scalers)
+	}
+	if len(got.buffers) != 0 {
+		t.Fatalf("expected no buffers, got %v", got.buffers)
+	}
+	if got.bufferSize != 0 {
+		t.Fatalf("expected 0 buffer size, got %v", got.bufferSize)
+	}
+	if len(got.dataTypes) != 0 {
+		t.Fatalf("expected no data types, got %v", got.dataTypes)
+	}
+	if got.outputType != DataTypeFloat64 {
+		t.Fatalf("expected output data type %v, got %v", DataTypeFloat64, got.outputType)
 	}
 }
 
@@ -54,15 +65,21 @@ func TestNoOpScaler(t *testing.T) {
 		Add("NI_Scale[0]_Scale_Type", "AdvancedAPI").
 		Add("NI_Scale[0]_AdvancedAPI_Input_Source", scaleIndexRawDataInput)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 
 	checkScaler(t, scaler, []Scaler{&NoOpScaler{}})
 
+	input := []float64{1, 2, 3, 4}
 	want := []float64{1, 2, 3, 4}
-	got, err := scaler.Scale(want)
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	got, err := scaler.Scale(input)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -85,7 +102,7 @@ func TestLinearScaler(t *testing.T) {
 		Add("NI_Scale[0]_Linear_Slope", 2.0).
 		Add("NI_Scale[0]_Linear_Y_Intercept", 10.0)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -94,6 +111,10 @@ func TestLinearScaler(t *testing.T) {
 
 	input := []float64{1, 2, 3, 4}
 	want := []float64{12, 14, 16, 18}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	got, err := scaler.Scale(input)
 	if err != nil {
@@ -118,7 +139,7 @@ func TestPolynomialScaler(t *testing.T) {
 		Add("NI_Scale[0]_Polynomial_Coefficients[2]", 2.0).
 		Add("NI_Scale[0]_Polynomial_Coefficients[3]", 3.0)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -127,6 +148,10 @@ func TestPolynomialScaler(t *testing.T) {
 
 	input := []float64{1, 2, 3, 4}
 	want := []float64{16, 44, 112, 238}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	got, err := scaler.Scale(input)
 	if err != nil {
@@ -148,7 +173,7 @@ func TestPolynomialScalerWithNoCoefficients(t *testing.T) {
 		Add("NI_Scale[0]_Scale_Type", "Polynomial").
 		Add("NI_Scale[0]_Polynomial_Coefficients_Size", 0)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -157,6 +182,10 @@ func TestPolynomialScalerWithNoCoefficients(t *testing.T) {
 
 	input := []float64{1, 2, 3, 4}
 	want := []float64{0, 0, 0, 0}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	got, err := scaler.Scale(input)
 	if err != nil {
@@ -179,7 +208,7 @@ func TestPolynomialScalerWithOneCoefficient(t *testing.T) {
 		Add("NI_Scale[0]_Polynomial_Coefficients_Size", 1).
 		Add("NI_Scale[0]_Polynomial_Coefficients[0]", 2)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -188,6 +217,10 @@ func TestPolynomialScalerWithOneCoefficient(t *testing.T) {
 
 	input := []float64{1, 2, 3, 4}
 	want := []float64{2, 2, 2, 2}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	got, err := scaler.Scale(input)
 	if err != nil {
@@ -232,7 +265,7 @@ func TestRTDScaler(t *testing.T) {
 				Add("NI_Scale[0]_RTD_Resistance_Configuration", tc.resistanceConfig).
 				Add("NI_Scale[0]_RTD_Input_Source", scaleIndexRawDataInput)
 
-			scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+			scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 			if err != nil {
 				t.Fatalf("Error creating scaler: %v", err)
 			}
@@ -240,6 +273,10 @@ func TestRTDScaler(t *testing.T) {
 			checkScaler(t, scaler, []Scaler{&RTDScaler{}})
 
 			input := []float64{0.5, 0.6}
+
+			if err := scaler.Allocate(len(input)); err != nil {
+				t.Fatalf("Expected no error, got %v", err)
+			}
 
 			got, err := scaler.Scale(input)
 			if err != nil {
@@ -458,7 +495,7 @@ func TestStrainScaler(t *testing.T) {
 					Add("NI_Scale[0]_Strain_Voltage_Excitation", 2.5).
 					Add("NI_Scale[0]_Strain_Input_Source", scaleIndexRawDataInput)
 
-				scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+				scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 				if err != nil {
 					t.Fatalf("Error creating scaler: %v", err)
 				}
@@ -468,6 +505,10 @@ func TestStrainScaler(t *testing.T) {
 				input := []float64{
 					0.0068827, 0.0068036, 0.0068800, 0.0068545, 0.0069104,
 					0.0068033, 0.0068023, 0.0068316, 0.0067672, 0.0067900,
+				}
+
+				if err := scaler.Allocate(len(input)); err != nil {
+					t.Fatalf("Expected no error, got %v", err)
 				}
 
 				got, err := scaler.Scale(input)
@@ -502,7 +543,7 @@ func TestRTDUnsupportedConfig(t *testing.T) {
 		Add("NI_Scale[0]_Strain_Voltage_Excitation", 2.5).
 		Add("NI_Scale[0]_Strain_Input_Source", scaleIndexRawDataInput)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Error creating scaler: %v", err)
 	}
@@ -510,6 +551,11 @@ func TestRTDUnsupportedConfig(t *testing.T) {
 	checkScaler(t, scaler, []Scaler{&StrainScaler{}})
 
 	input := []float64{1, 2, 3}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
 	output, err := scaler.Scale(input)
 	if !errors.Is(err, ErrUnsupportedStrainConfiguration) {
 		t.Fatalf("Expected error to be ErrUnsupportedStrainConfiguration, got %v", err)
@@ -535,7 +581,7 @@ func TestTableScaler(t *testing.T) {
 		Add("NI_Scale[0]_Table_Pre_Scaled_Values[1]", 4.0).
 		Add("NI_Scale[0]_Table_Pre_Scaled_Values[2]", 8.0)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Error creating scaler: %v", err)
 	}
@@ -544,6 +590,10 @@ func TestTableScaler(t *testing.T) {
 
 	input := []float64{0.5, 1, 1.5, 2.5, 3, 3.5}
 	want := []float64{2, 2, 3, 6, 8, 8}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	got, err := scaler.Scale(input)
 	if err != nil {
@@ -590,7 +640,7 @@ func TestThermistorScalerVoltageExcitation(t *testing.T) {
 				Add("NI_Scale[0]_Thermistor_Temperature_Offset", 1.0).
 				Add("NI_Scale[0]_Thermistor_Input_Source", scaleIndexRawDataInput)
 
-			scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+			scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 			if err != nil {
 				t.Fatalf("Error creating scaler: %v", err)
 			}
@@ -598,6 +648,10 @@ func TestThermistorScalerVoltageExcitation(t *testing.T) {
 			checkScaler(t, scaler, []Scaler{&ThermistorScaler{}})
 
 			input := []float64{1.1, 1.0, 0.9}
+
+			if err := scaler.Allocate(len(input)); err != nil {
+				t.Fatalf("Expected no error, got %v", err)
+			}
 
 			got, err := scaler.Scale(input)
 			if err != nil {
@@ -646,7 +700,7 @@ func TestThermistorScalerCurrentExcitation(t *testing.T) {
 				Add("NI_Scale[0]_Thermistor_Temperature_Offset", 1.0).
 				Add("NI_Scale[0]_Thermistor_Input_Source", scaleIndexRawDataInput)
 
-			scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+			scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 			if err != nil {
 				t.Fatalf("Error creating scaler: %v", err)
 			}
@@ -654,6 +708,10 @@ func TestThermistorScalerCurrentExcitation(t *testing.T) {
 			checkScaler(t, scaler, []Scaler{&ThermistorScaler{}})
 
 			input := []float64{1.1, 1.0, 0.9}
+
+			if err := scaler.Allocate(len(input)); err != nil {
+				t.Fatalf("Expected no error, got %v", err)
+			}
 
 			got, err := scaler.Scale(input)
 			if err != nil {
@@ -686,7 +744,7 @@ func TestThermistorUnsupportedExcitationType(t *testing.T) {
 		Add("NI_Scale[0]_Thermistor_Temperature_Offset", 1.0).
 		Add("NI_Scale[0]_Thermistor_Input_Source", scaleIndexRawDataInput)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Error creating scaler: %v", err)
 	}
@@ -694,6 +752,10 @@ func TestThermistorUnsupportedExcitationType(t *testing.T) {
 	checkScaler(t, scaler, []Scaler{&ThermistorScaler{}})
 
 	input := []float64{1.1, 1.0, 0.9}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	got, err := scaler.Scale(input)
 	if err == nil {
@@ -712,7 +774,7 @@ func TestThermocoupleScalerVoltageToTemperature(t *testing.T) {
 		Add("NI_Scale[0]_Thermocouple_Scaling_Direction", 0).
 		Add("NI_Scale[0]_Thermocouple_Input_Source", scaleIndexRawDataInput)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Error creating scaler: %v", err)
 	}
@@ -721,6 +783,10 @@ func TestThermocoupleScalerVoltageToTemperature(t *testing.T) {
 
 	input := []float64{0, 10, 100, 1000}
 	want := []float64{0, 0.250843110, 2.50889889, 24.9836476}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	got, err := scaler.Scale(input)
 	if err != nil {
@@ -744,7 +810,7 @@ func TestThermocoupleScalerTemperatureToVoltage(t *testing.T) {
 		Add("NI_Scale[0]_Thermocouple_Scaling_Direction", 1).
 		Add("NI_Scale[0]_Thermocouple_Input_Source", scaleIndexRawDataInput)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Error creating scaler: %v", err)
 	}
@@ -753,6 +819,10 @@ func TestThermocoupleScalerTemperatureToVoltage(t *testing.T) {
 
 	input := []float64{0, 10, 50, 100}
 	want := []float64{0, 396.8619078, 2023.0778862, 4096.2302187}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	got, err := scaler.Scale(input)
 	if err != nil {
@@ -780,7 +850,7 @@ func TestAddScaler(t *testing.T) {
 		Add("NI_Scale[1]_Add_Left_Operand_Input_Source", scaleIndexRawDataInput).
 		Add("NI_Scale[1]_Add_Right_Operand_Input_Source", 0)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeInt32, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeInt32)
 	if err != nil {
 		t.Fatalf("Error getting object scaler: %v", err)
 	}
@@ -789,6 +859,10 @@ func TestAddScaler(t *testing.T) {
 
 	input := []int32{1, 2, 3}
 	want := []float64{13, 16, 19}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	got, err := scaler.Scale(input)
 	if err != nil {
@@ -810,7 +884,7 @@ func TestSubtractScaler(t *testing.T) {
 		Add("NI_Scale[1]_Subtract_Left_Operand_Input_Source", scaleIndexRawDataInput).
 		Add("NI_Scale[1]_Subtract_Right_Operand_Input_Source", 0)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeInt32, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeInt32)
 	if err != nil {
 		t.Fatalf("Error getting object scaler: %v", err)
 	}
@@ -819,6 +893,10 @@ func TestSubtractScaler(t *testing.T) {
 
 	input := []int32{1, 2, 3}
 	want := []float64{-11, -12, -13}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	got, err := scaler.Scale(input)
 	if err != nil {
@@ -846,7 +924,7 @@ func TestMultipleScalers(t *testing.T) {
 		Add("NI_Scale[2]_Linear_Y_Intercept", 3.0).
 		Add("NI_Scale[2]_Linear_Input_Source", 1)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Error getting object scaler: %v", err)
 	}
@@ -855,6 +933,10 @@ func TestMultipleScalers(t *testing.T) {
 
 	input := []float64{1, 2, 3}
 	want := []float64{21, 27, 33}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	got, err := scaler.Scale(input)
 	if err != nil {
@@ -889,7 +971,7 @@ func TestMultipleScalerWithAllRawDataInput(t *testing.T) {
 		Add("NI_Scale[2]_Linear_Y_Intercept", 3.0).
 		Add("NI_Scale[2]_Linear_Input_Source", scaleIndexRawDataInput)
 
-	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64, batchSize)
+	scaler, err := getObjectScaler(&object{properties: props}, DataTypeFloat64)
 	if err != nil {
 		t.Fatalf("Error getting object scaler: %v", err)
 	}
@@ -898,6 +980,10 @@ func TestMultipleScalerWithAllRawDataInput(t *testing.T) {
 
 	input := []float64{1, 2, 3}
 	want := []float64{6, 9, 12}
+
+	if err := scaler.Allocate(len(input)); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
 
 	got, err := scaler.Scale(input)
 	if err != nil {

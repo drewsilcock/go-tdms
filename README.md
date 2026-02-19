@@ -83,9 +83,11 @@ As of February 2026, this is being actively maintained but has not been battled-
 | Complex floating point data types           | ☑️     |
 | Multi-chunk segments                        | ☑️     |
 | Data interleaving                           | ☑️     |
-| Data scaling                                | □      |
+| Data scaling                                | ☑️     |
 | DAQmx data and scalers                      | □      |
-| Fixed point numerics                        | □      |
+| Fixed point numerics                        | □ *    |
+
+* See note below on fixed point numerics.
 
 ### Future work
 

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"time"
 )
@@ -82,6 +83,15 @@ const (
 const fractionsPerNs uint64 = 18_446_744_073 // 2 ** 64 / 10 ** 9
 
 var tdmsEpoch int64 = time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+
+// Anything with exponent filled with 1s and non-zero mantissa is a NaN – this
+// is the one we choose to use.
+var quadNaN = []byte{
+	0x7f, 0xff, 0x01, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+}
 
 // Size returns the size in bytes of a single value of this data type.
 // Returns 0 for variable-length types like strings.
@@ -234,10 +244,20 @@ func (f Float128) String() string {
 	return f.AsBigFloat().String()
 }
 
+func (f Float128) IsNaN() bool {
+	exponent := int(f[0]&0x7F)<<8 | int(f[1])
+	return exponent == 0x7fff && !isZeroMantissa(f[2:16])
+}
+
 // AsFloat64 converts the 128-bit extended precision float to a primitive float64.
 // This loses a significant amount of precision. To avoid losing any precision
 // at the cost of usability, see [Float128.AsBigFloat].
 func (f Float128) AsFloat64() float64 {
+	// Big float doesn't handle NaN so we have to handle this separately.
+	if f.IsNaN() {
+		return math.NaN()
+	}
+
 	result, _ := f.AsBigFloat().Float64()
 	return result
 }
@@ -258,8 +278,7 @@ func (f Float128) AsBigFloat() *big.Float {
 	exponent |= uint16(f[1])
 
 	// Extract mantissa (bits 111-0, 112 bits)
-	mantissaBits := make([]byte, 14)
-	copy(mantissaBits, f[2:16])
+	mantissaBits := f[2:16]
 
 	// Quad precision has 113 bits of precision according to IEEE (remember
 	// implicit leading 1).
@@ -331,12 +350,10 @@ func (f *Float128) SetBigFloat(bf *big.Float) *Float128 {
 		f[i] = 0
 	}
 
-	// Handle nil input
 	if bf == nil {
 		return f
 	}
 
-	// Handle special cases
 	if bf.IsInf() {
 		// Set exponent to all 1s (0x7FFF)
 		f[0] = 0x7F
@@ -349,8 +366,13 @@ func (f *Float128) SetBigFloat(bf *big.Float) *Float128 {
 		return f
 	}
 
+	// Big floats cannot be NaN so we don't need to handle that case.
+
 	// Handle zero
 	if bf.Sign() == 0 {
+		if bf.Signbit() {
+			f[0] |= 0x80
+		}
 		return f
 	}
 
@@ -486,6 +508,12 @@ func (f *Float128) SetBigFloat(bf *big.Float) *Float128 {
 }
 
 func (f *Float128) SetFloat64(value float64) *Float128 {
+	// big.Float cannot handle NaN, so we have to handle it ourselves.
+	if math.IsNaN(value) {
+		*f = Float128(quadNaN)
+		return f
+	}
+
 	return f.SetBigFloat(big.NewFloat(value))
 }
 
@@ -544,7 +572,7 @@ type Timestamp struct {
 // information than [time.Time]. This precision loss is not relevant for most
 // purposes, but important to keep in mind for high-precision applications.
 func (t Timestamp) AsTime() time.Time {
-	return time.Unix(t.Timestamp-tdmsEpoch, int64(t.Remainder/fractionsPerNs))
+	return time.Unix(t.Timestamp+tdmsEpoch, int64(t.Remainder/fractionsPerNs)).UTC()
 }
 
 // String implements the [fmt.Stringer] interface, returning the string
@@ -555,7 +583,7 @@ func (t Timestamp) String() string {
 
 func NewTimestamp(t time.Time) Timestamp {
 	return Timestamp{
-		Timestamp: t.Unix() + tdmsEpoch,
+		Timestamp: t.Unix() - tdmsEpoch,
 		Remainder: uint64(t.Nanosecond()) * fractionsPerNs,
 	}
 }

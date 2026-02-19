@@ -79,8 +79,10 @@ func bufferLen(buffer any) int {
 		return len(v)
 	case []complex128:
 		return len(v)
+	case []any:
+		return len(v)
 	default:
-		return 0
+		panic("unsupported buffer type")
 	}
 }
 
@@ -118,7 +120,9 @@ func sliceBuffer(buffer any, from, to int) any {
 		return v[from:to]
 	case []complex128:
 		return v[from:to]
+	case []any:
+		return v[from:to]
 	default:
-		return nil
+		panic("unsupported buffer type")
 	}
 }

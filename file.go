@@ -229,10 +229,10 @@ func (t *File) readMetadata() error {
 				totalNumValues += chunk.numValues
 			}
 
-			channels[channelName] = Channel{
+			channel := Channel{
 				Name:           channelName,
 				GroupName:      groupName,
-				DataType:       obj.index.dataType,
+				RawDataType:    obj.index.dataType,
 				Properties:     obj.properties,
 				reader:         t.r,
 				path:           obj.path,
@@ -240,6 +240,14 @@ func (t *File) readMetadata() error {
 				totalNumValues: totalNumValues,
 				file:           t,
 			}
+
+			channel.scaler, err = getChannelScaler(&channel)
+			if err != nil {
+				return fmt.Errorf("failed to get channel scaler for channel %s", channelName)
+			}
+			channel.ScaledDataType = channel.scaler.outputType
+
+			channels[channelName] = channel
 		}
 	}
 

@@ -1,7 +1,6 @@
 package tdms
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -63,9 +62,6 @@ const (
 
 	// 3-wire mode
 	resistanceConfiguration3Wire = 3
-
-	// 4-wire mode
-	resistanceConfiguration4Wire = 4
 
 	thermocoupleTypeB thermocoupleType = 10047
 	thermocoupleTypeE thermocoupleType = 10055
@@ -964,7 +960,7 @@ func thermistorScale[T Numeric](s *ThermistorScaler, input []T, out []float64) e
 		rt = adjustForLeadResistance(rt, s.excitationType, s.resistanceConfiguration, s.leadWireResistance)
 		logRt := math.Log(rt)
 
-		out[i] = 1/(s.a+s.b*logRt+s.c*math.Pow(logRt, 3)) - s.temperatureOffset
+		out[i] = 1/(s.a+s.b*logRt+s.c*logRt*logRt*logRt) - s.temperatureOffset
 	}
 
 	return nil
@@ -1235,57 +1231,69 @@ type Multiscaler struct {
 	scalers    []Scaler
 	buffers    []any
 	bufferSize int
+	dataTypes  []DataType
+	outputType DataType
 }
 
-func NewMultiscaler(rawDataType DataType, bufferSize int, scalers []Scaler) (*Multiscaler, error) {
-	if len(scalers) == 0 {
-		return nil, errors.New("multiscaler requires at least one scaler")
+func NewMultiscaler(rawDataType DataType, scalers []Scaler) (*Multiscaler, error) {
+	m := Multiscaler{
+		scalers:    scalers,
+		buffers:    make([]any, len(scalers)),
+		bufferSize: 0,
+		dataTypes:  make([]DataType, len(scalers)),
+		outputType: rawDataType,
 	}
 
+	var err error
+
+	for i, scaler := range scalers {
+		inputTypes := make([]DataType, len(scaler.InputSources()))
+		for i, inputSource := range scaler.InputSources() {
+			if inputSource == scaleIndexRawDataInput {
+				inputTypes[i] = rawDataType
+			} else {
+				inputTypes[i] = m.dataTypes[inputSource]
+			}
+		}
+
+		m.dataTypes[i], err = scaler.OutputType(inputTypes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get output type for scaler %d: %w", i, err)
+		}
+	}
+
+	if len(m.dataTypes) > 0 {
+		m.outputType = m.dataTypes[len(m.dataTypes)-1]
+	}
+
+	return &m, nil
+}
+
+func (m *Multiscaler) Allocate(bufferSize int) error {
 	// We need to create intermediate buffers for each scaler as they can all be
 	// different types. We do the reading in batches so this isn't too bad.
 	// Theoretically, we could re-use buffers to save space, but we'd need to
 	// check that the buffer wasn't being re-used later on as scaler[i] doesn't
 	// necessarily need to have scaler[i-1] as input (e.g. add, subtract
 	// scalers).
-	m := Multiscaler{
-		scalers:    scalers,
-		buffers:    make([]any, len(scalers)),
-		bufferSize: bufferSize,
-	}
-
-	dataTypes := make([]DataType, len(scalers))
 	var err error
+	m.bufferSize = bufferSize
 
-	for i, scaler := range scalers {
-		outputType := DataTypeVoid
-
-		inputTypes := make([]DataType, len(scaler.InputSources()))
-		for i, inputSource := range scaler.InputSources() {
-			if inputSource == scaleIndexRawDataInput {
-				inputTypes[i] = rawDataType
-			} else {
-				inputTypes[i] = dataTypes[inputSource]
-			}
-		}
-
-		outputType, err = scaler.OutputType(inputTypes)
+	for i := range m.buffers {
+		m.buffers[i], err = allocateBuffer(m.dataTypes[i], m.bufferSize)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get output type for scaler %d: %w", i, err)
+			return fmt.Errorf("failed to allocate buffer for scaler %d: %w", i, err)
 		}
-
-		m.buffers[i], err = allocateBuffer(outputType, bufferSize)
-		if err != nil {
-			return nil, fmt.Errorf("failed to allocate buffer for scaler %d: %w", i, err)
-		}
-
-		dataTypes[i] = outputType
 	}
 
-	return &m, nil
+	return nil
 }
 
 func (m *Multiscaler) Scale(input any) (any, error) {
+	if len(m.scalers) == 0 {
+		return input, nil
+	}
+
 	// The last batch in a batch processed stream of data will be smaller, so
 	// shrink our buffers.
 	inputLen := bufferLen(input)
@@ -1323,23 +1331,23 @@ func (m *Multiscaler) Scale(input any) (any, error) {
 // LabVIEW does not do this.
 //
 // bufferSize here is the size of the buffer to be scaled.
-func getChannelScaler(channel *Channel, bufferSize int) (*Multiscaler, error) {
+func getChannelScaler(channel *Channel) (*Multiscaler, error) {
 	channelObj := channel.file.objects[channel.path]
-	if channelScaler, err := getObjectScaler(&channelObj, channel.DataType, bufferSize); err != nil {
+	if channelScaler, err := getObjectScaler(&channelObj, channel.RawDataType); err != nil {
 		return nil, err
 	} else if channelScaler != nil {
 		return channelScaler, nil
 	}
 
 	groupObj := channel.file.objects[channel.file.Groups[channel.GroupName].path]
-	if groupScaler, err := getObjectScaler(&groupObj, channel.DataType, bufferSize); err != nil {
+	if groupScaler, err := getObjectScaler(&groupObj, channel.RawDataType); err != nil {
 		return nil, err
 	} else if groupScaler != nil {
 		return groupScaler, nil
 	}
 
 	fileObj := channel.file.objects[""]
-	if fileScaler, err := getObjectScaler(&fileObj, channel.DataType, bufferSize); err != nil {
+	if fileScaler, err := getObjectScaler(&fileObj, channel.RawDataType); err != nil {
 		return nil, err
 	} else if fileScaler != nil {
 		return fileScaler, nil
@@ -1357,7 +1365,7 @@ func getChannelScaler(channel *Channel, bufferSize int) (*Multiscaler, error) {
 // because sometimes the scaler is applied to the group or file-level in which
 // case there will be no raw data index and thus no data type within the object
 // itself.
-func getObjectScaler(obj *object, dataType DataType, bufferSize int) (*Multiscaler, error) {
+func getObjectScaler(obj *object, dataType DataType) (*Multiscaler, error) {
 	scalingType, err := obj.properties.GetString("NI_Scaling_Status", "unscaled")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get scaling type: %w", err)
@@ -1366,12 +1374,12 @@ func getObjectScaler(obj *object, dataType DataType, bufferSize int) (*Multiscal
 		// If scaling type is "scaled", it confusingly means the scaling has
 		// been baked into the data in the TDMS file and so we don't want to do
 		// any additional scaling ourselves.
-		return nil, nil
+		return NewMultiscaler(dataType, nil)
 	}
 
 	numScalers := getNumScalings(obj.properties)
 	if numScalers == 0 {
-		return nil, nil
+		return NewMultiscaler(dataType, nil)
 	}
 
 	scalers := make([]Scaler, numScalers)
@@ -1451,7 +1459,7 @@ func getObjectScaler(obj *object, dataType DataType, bufferSize int) (*Multiscal
 		scalers[scaleIndex] = scaler
 	}
 
-	return NewMultiscaler(dataType, bufferSize, scalers)
+	return NewMultiscaler(dataType, scalers)
 }
 
 func getNumScalings(properties Properties) int {
@@ -1491,5 +1499,6 @@ func adjustForLeadResistance(
 		return measuredResistance - 2*leadWireResistance
 	}
 
+	// There's also a 4-wire mode but that's no handled any different from the fallback.
 	return measuredResistance
 }

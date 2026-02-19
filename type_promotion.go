@@ -30,19 +30,15 @@ import (
 // With precision forming a hierarchy within each type.
 func getPromotedType(leftType DataType, rightType DataType) (DataType, error) {
 	if leftType == DataTypeBool || rightType == DataTypeBool {
-		return DataTypeVoid, fmt.Errorf("cannot perform arithmetic on boolean types")
+		return DataTypeVoid, errors.New("cannot perform arithmetic on boolean types")
 	}
 
 	if leftType == DataTypeTimestamp || rightType == DataTypeTimestamp {
-		return DataTypeVoid, fmt.Errorf("cannot perform arithmetic on timestamp types")
+		return DataTypeVoid, errors.New("cannot perform arithmetic on timestamp types")
 	}
 
 	if leftType == DataTypeString || rightType == DataTypeString {
-		if leftType != rightType {
-			return DataTypeVoid, errors.New("cannot perform arithmetic on string and non-string types")
-		}
-
-		return DataTypeString, nil
+		return DataTypeVoid, errors.New("cannot perform arithmetic on string types")
 	}
 
 	isComplex := func(dt DataType) bool {
@@ -166,72 +162,13 @@ func registerHandler(opMap map[opTypeKey]opHandlerFunc, leftType, rightType Data
 	opMap[opTypeKey{leftType, rightType}] = handler
 }
 
-// Helper to convert any numeric value to float64 for complex operations
-func toFloat64(v any) float64 {
-	switch val := v.(type) {
-	case int8:
-		return float64(val)
-	case int16:
-		return float64(val)
-	case int32:
-		return float64(val)
-	case int64:
-		return float64(val)
-	case uint8:
-		return float64(val)
-	case uint16:
-		return float64(val)
-	case uint32:
-		return float64(val)
-	case uint64:
-		return float64(val)
-	case float32:
-		return float64(val)
-	case float64:
-		return val
-	case Float128:
-		return val.AsFloat64()
-	default:
-		return 0
-	}
-}
-
-// Helper to convert any numeric value to big.Float
-func toBigFloat(v any) *big.Float {
-	switch val := v.(type) {
-	case int8:
-		return big.NewFloat(float64(val))
-	case int16:
-		return big.NewFloat(float64(val))
-	case int32:
-		return big.NewFloat(float64(val))
-	case int64:
-		return big.NewFloat(float64(val))
-	case uint8:
-		return big.NewFloat(float64(val))
-	case uint16:
-		return big.NewFloat(float64(val))
-	case uint32:
-		return big.NewFloat(float64(val))
-	case uint64:
-		return big.NewFloat(float64(val))
-	case float32:
-		return big.NewFloat(float64(val))
-	case float64:
-		return big.NewFloat(val)
-	case Float128:
-		return val.AsBigFloat()
-	default:
-		return big.NewFloat(0)
-	}
-}
-
 func init() {
 	// Register handlers for all type combinations
 	numericTypes := []DataType{
 		DataTypeInt8, DataTypeInt16, DataTypeInt32, DataTypeInt64,
 		DataTypeUint8, DataTypeUint16, DataTypeUint32, DataTypeUint64,
 		DataTypeFloat32, DataTypeFloat64, DataTypeFloat128,
+		DataTypeFloat32WithUnit, DataTypeFloat64WithUnit, DataTypeFloat128WithUnit,
 		DataTypeComplex64, DataTypeComplex128,
 	}
 
@@ -242,27 +179,13 @@ func init() {
 				continue
 			}
 
-			// Register add handler
-			registerHandler(addHandlers, leftType, rightType, makeArithmeticHandler(leftType, rightType, promotedType, true))
-
-			// Register subtract handler
-			registerHandler(subHandlers, leftType, rightType, makeArithmeticHandler(leftType, rightType, promotedType, false))
+			registerHandler(addHandlers, leftType, rightType, makeArithmeticHandler(promotedType, true))
+			registerHandler(subHandlers, leftType, rightType, makeArithmeticHandler(promotedType, false))
 		}
 	}
-
-	// Special handlers for strings (add only - concatenation)
-	registerHandler(addHandlers, DataTypeString, DataTypeString, func(leftValues any, rightValues any, output any) error {
-		left := leftValues.([]string)
-		right := rightValues.([]string)
-		out := output.([]string)
-		for i := range left {
-			out[i] = left[i] + right[i]
-		}
-		return nil
-	})
 }
 
-func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd bool) opHandlerFunc {
+func makeArithmeticHandler(promotedType DataType, isAdd bool) opHandlerFunc {
 	return func(leftValues any, rightValues any, output any) error {
 		leftVal := reflect.ValueOf(leftValues)
 		rightVal := reflect.ValueOf(rightValues)
@@ -275,9 +198,9 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 		switch promotedType {
 		case DataTypeInt8:
 			out := output.([]int8)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := int8(leftVal.Index(i).Int())
-				r := int8(rightVal.Index(i).Int())
+			for i := range leftVal.Len() {
+				l := convertToSignedInteger[int8](leftVal.Index(i))
+				r := convertToSignedInteger[int8](rightVal.Index(i))
 				if isAdd {
 					out[i] = l + r
 				} else {
@@ -287,9 +210,9 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 
 		case DataTypeInt16:
 			out := output.([]int16)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := convertToInt16(leftVal.Index(i), leftType)
-				r := convertToInt16(rightVal.Index(i), rightType)
+			for i := range leftVal.Len() {
+				l := convertToSignedInteger[int16](leftVal.Index(i))
+				r := convertToSignedInteger[int16](rightVal.Index(i))
 				if isAdd {
 					out[i] = l + r
 				} else {
@@ -299,9 +222,9 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 
 		case DataTypeInt32:
 			out := output.([]int32)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := convertToInt32(leftVal.Index(i), leftType)
-				r := convertToInt32(rightVal.Index(i), rightType)
+			for i := range leftVal.Len() {
+				l := convertToSignedInteger[int32](leftVal.Index(i))
+				r := convertToSignedInteger[int32](rightVal.Index(i))
 				if isAdd {
 					out[i] = l + r
 				} else {
@@ -311,9 +234,9 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 
 		case DataTypeInt64:
 			out := output.([]int64)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := convertToInt64(leftVal.Index(i), leftType)
-				r := convertToInt64(rightVal.Index(i), rightType)
+			for i := range leftVal.Len() {
+				l := convertToSignedInteger[int64](leftVal.Index(i))
+				r := convertToSignedInteger[int64](rightVal.Index(i))
 				if isAdd {
 					out[i] = l + r
 				} else {
@@ -323,9 +246,9 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 
 		case DataTypeUint8:
 			out := output.([]uint8)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := uint8(leftVal.Index(i).Uint())
-				r := uint8(rightVal.Index(i).Uint())
+			for i := range leftVal.Len() {
+				l := convertToUnsignedInteger[uint8](leftVal.Index(i))
+				r := convertToUnsignedInteger[uint8](rightVal.Index(i))
 				if isAdd {
 					out[i] = l + r
 				} else {
@@ -335,9 +258,9 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 
 		case DataTypeUint16:
 			out := output.([]uint16)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := convertToUint16(leftVal.Index(i), leftType)
-				r := convertToUint16(rightVal.Index(i), rightType)
+			for i := range leftVal.Len() {
+				l := convertToUnsignedInteger[uint16](leftVal.Index(i))
+				r := convertToUnsignedInteger[uint16](rightVal.Index(i))
 				if isAdd {
 					out[i] = l + r
 				} else {
@@ -347,9 +270,9 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 
 		case DataTypeUint32:
 			out := output.([]uint32)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := convertToUint32(leftVal.Index(i), leftType)
-				r := convertToUint32(rightVal.Index(i), rightType)
+			for i := range leftVal.Len() {
+				l := convertToUnsignedInteger[uint32](leftVal.Index(i))
+				r := convertToUnsignedInteger[uint32](rightVal.Index(i))
 				if isAdd {
 					out[i] = l + r
 				} else {
@@ -359,9 +282,9 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 
 		case DataTypeUint64:
 			out := output.([]uint64)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := convertToUint64(leftVal.Index(i), leftType)
-				r := convertToUint64(rightVal.Index(i), rightType)
+			for i := range leftVal.Len() {
+				l := convertToUnsignedInteger[uint64](leftVal.Index(i))
+				r := convertToUnsignedInteger[uint64](rightVal.Index(i))
 				if isAdd {
 					out[i] = l + r
 				} else {
@@ -369,11 +292,11 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 				}
 			}
 
-		case DataTypeFloat32:
+		case DataTypeFloat32, DataTypeFloat32WithUnit:
 			out := output.([]float32)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := convertToFloat32(leftVal.Index(i), leftType)
-				r := convertToFloat32(rightVal.Index(i), rightType)
+			for i := range leftVal.Len() {
+				l := convertToFloat[float32](leftVal.Index(i))
+				r := convertToFloat[float32](rightVal.Index(i))
 				if isAdd {
 					out[i] = l + r
 				} else {
@@ -381,11 +304,11 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 				}
 			}
 
-		case DataTypeFloat64:
+		case DataTypeFloat64, DataTypeFloat64WithUnit:
 			out := output.([]float64)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := convertToFloat64(leftVal.Index(i), leftType)
-				r := convertToFloat64(rightVal.Index(i), rightType)
+			for i := range leftVal.Len() {
+				l := convertToFloat[float64](leftVal.Index(i))
+				r := convertToFloat[float64](rightVal.Index(i))
 				if isAdd {
 					out[i] = l + r
 				} else {
@@ -393,11 +316,11 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 				}
 			}
 
-		case DataTypeFloat128:
+		case DataTypeFloat128, DataTypeFloat128WithUnit:
 			out := output.([]Float128)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := convertToBigFloat(leftVal.Index(i), leftType)
-				r := convertToBigFloat(rightVal.Index(i), rightType)
+			for i := range leftVal.Len() {
+				l := convertToBigFloat(leftVal.Index(i))
+				r := convertToBigFloat(rightVal.Index(i))
 				var result *big.Float
 				if isAdd {
 					result = new(big.Float).Add(l, r)
@@ -409,9 +332,9 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 
 		case DataTypeComplex64:
 			out := output.([]complex64)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := convertToComplex64(leftVal.Index(i), leftType)
-				r := convertToComplex64(rightVal.Index(i), rightType)
+			for i := range leftVal.Len() {
+				l := convertToComplex[complex64](leftVal.Index(i))
+				r := convertToComplex[complex64](rightVal.Index(i))
 				if isAdd {
 					out[i] = l + r
 				} else {
@@ -421,9 +344,9 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 
 		case DataTypeComplex128:
 			out := output.([]complex128)
-			for i := 0; i < leftVal.Len(); i++ {
-				l := convertToComplex128(leftVal.Index(i), leftType)
-				r := convertToComplex128(rightVal.Index(i), rightType)
+			for i := range leftVal.Len() {
+				l := convertToComplex[complex128](leftVal.Index(i))
+				r := convertToComplex[complex128](rightVal.Index(i))
 				if isAdd {
 					out[i] = l + r
 				} else {
@@ -439,150 +362,79 @@ func makeArithmeticHandler(leftType, rightType, promotedType DataType, isAdd boo
 	}
 }
 
-// Conversion helper functions
-func convertToInt16(v reflect.Value, srcType DataType) int16 {
-	switch srcType {
-	case DataTypeInt8:
-		return int16(v.Int())
-	case DataTypeInt16:
-		return int16(v.Int())
-	case DataTypeUint8:
-		return int16(v.Uint())
-	default:
-		return 0
+type signedInteger interface{ int8 | int16 | int32 | int64 }
+type unsignedInteger interface {
+	uint8 | uint16 | uint32 | uint64
+}
+type float interface{ float32 | float64 }
+type complexFloat interface{ complex64 | complex128 }
+
+func convertToUnsignedInteger[T unsignedInteger](v reflect.Value) T {
+	if v.CanUint() {
+		return T(v.Uint())
 	}
+
+	if v.CanInt() {
+		return T(v.Int())
+	}
+
+	return 0
 }
 
-func convertToInt32(v reflect.Value, srcType DataType) int32 {
-	switch srcType {
-	case DataTypeInt8, DataTypeInt16, DataTypeInt32:
-		return int32(v.Int())
-	case DataTypeUint8, DataTypeUint16:
-		return int32(v.Uint())
-	default:
-		return 0
+func convertToSignedInteger[T signedInteger](v reflect.Value) T {
+	if v.CanInt() {
+		return T(v.Int())
 	}
+
+	if v.CanUint() {
+		return T(v.Uint())
+	}
+
+	return 0
 }
 
-func convertToInt64(v reflect.Value, srcType DataType) int64 {
-	switch srcType {
-	case DataTypeInt8, DataTypeInt16, DataTypeInt32, DataTypeInt64:
-		return v.Int()
-	case DataTypeUint8, DataTypeUint16, DataTypeUint32:
-		return int64(v.Uint())
-	default:
-		return 0
+func convertToFloat[T float](v reflect.Value) T {
+	if v.CanFloat() {
+		return T(v.Float())
 	}
+
+	if v.CanInt() {
+		return T(v.Int())
+	}
+
+	if v.CanUint() {
+		return T(v.Uint())
+	}
+
+	return 0
 }
 
-func convertToUint16(v reflect.Value, srcType DataType) uint16 {
-	switch srcType {
-	case DataTypeUint8:
-		return uint16(v.Uint())
-	case DataTypeUint16:
-		return uint16(v.Uint())
-	default:
-		return 0
+func convertToComplex[T complexFloat](v reflect.Value) T {
+	if v.CanComplex() {
+		return T(v.Complex())
 	}
+
+	if v.CanFloat() {
+		return T(complex(v.Float(), 0))
+	}
+
+	if v.CanInt() {
+		return T(complex(float64(v.Int()), 0))
+	}
+
+	if v.CanUint() {
+		return T(complex(float64(v.Uint()), 0))
+	}
+
+	return 0
 }
 
-func convertToUint32(v reflect.Value, srcType DataType) uint32 {
-	switch srcType {
-	case DataTypeUint8, DataTypeUint16, DataTypeUint32:
-		return uint32(v.Uint())
-	default:
-		return 0
+func convertToBigFloat(v reflect.Value) *big.Float {
+	if f, ok := v.Interface().(Float128); ok {
+		return f.AsBigFloat()
 	}
-}
 
-func convertToUint64(v reflect.Value, srcType DataType) uint64 {
-	switch srcType {
-	case DataTypeUint8, DataTypeUint16, DataTypeUint32, DataTypeUint64:
-		return v.Uint()
-	default:
-		return 0
-	}
-}
-
-func convertToFloat32(v reflect.Value, srcType DataType) float32 {
-	switch srcType {
-	case DataTypeInt8, DataTypeInt16, DataTypeInt32, DataTypeInt64:
-		return float32(v.Int())
-	case DataTypeUint8, DataTypeUint16, DataTypeUint32, DataTypeUint64:
-		return float32(v.Uint())
-	case DataTypeFloat32:
-		return float32(v.Float())
-	default:
-		return 0
-	}
-}
-
-func convertToFloat64(v reflect.Value, srcType DataType) float64 {
-	switch srcType {
-	case DataTypeInt8, DataTypeInt16, DataTypeInt32, DataTypeInt64:
-		return float64(v.Int())
-	case DataTypeUint8, DataTypeUint16, DataTypeUint32, DataTypeUint64:
-		return float64(v.Uint())
-	case DataTypeFloat32, DataTypeFloat64:
-		return v.Float()
-	default:
-		return 0
-	}
-}
-
-func convertToBigFloat(v reflect.Value, srcType DataType) *big.Float {
-	switch srcType {
-	case DataTypeInt8, DataTypeInt16, DataTypeInt32, DataTypeInt64:
-		return big.NewFloat(float64(v.Int()))
-	case DataTypeUint8, DataTypeUint16, DataTypeUint32, DataTypeUint64:
-		return big.NewFloat(float64(v.Uint()))
-	case DataTypeFloat32, DataTypeFloat64:
-		return big.NewFloat(v.Float())
-	case DataTypeFloat128:
-		return v.Interface().(Float128).AsBigFloat()
-	default:
-		return big.NewFloat(0)
-	}
-}
-
-func convertToComplex64(v reflect.Value, srcType DataType) complex64 {
-	switch srcType {
-	case DataTypeInt8, DataTypeInt16, DataTypeInt32, DataTypeInt64:
-		return complex64(complex(float64(v.Int()), 0))
-	case DataTypeUint8, DataTypeUint16, DataTypeUint32, DataTypeUint64:
-		return complex64(complex(float64(v.Uint()), 0))
-	case DataTypeFloat32, DataTypeFloat64:
-		return complex64(complex(v.Float(), 0))
-	case DataTypeFloat128:
-		f := v.Interface().(Float128).AsFloat64()
-		return complex64(complex(f, 0))
-	case DataTypeComplex64:
-		return complex64(v.Complex())
-	case DataTypeComplex128:
-		return complex64(v.Complex())
-	default:
-		return 0
-	}
-}
-
-func convertToComplex128(v reflect.Value, srcType DataType) complex128 {
-	switch srcType {
-	case DataTypeInt8, DataTypeInt16, DataTypeInt32, DataTypeInt64:
-		return complex(float64(v.Int()), 0)
-	case DataTypeUint8, DataTypeUint16, DataTypeUint32, DataTypeUint64:
-		return complex(float64(v.Uint()), 0)
-	case DataTypeFloat32, DataTypeFloat64:
-		return complex(v.Float(), 0)
-	case DataTypeFloat128:
-		f := v.Interface().(Float128).AsFloat64()
-		return complex(f, 0)
-	case DataTypeComplex64:
-		return complex128(v.Complex())
-	case DataTypeComplex128:
-		return v.Complex()
-	default:
-		return 0
-	}
+	return big.NewFloat(convertToFloat[float64](v))
 }
 
 func getDataType(v any) DataType {
