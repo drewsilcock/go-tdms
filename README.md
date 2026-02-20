@@ -100,7 +100,7 @@ When reading DAQmx data, you use exactly the same read methods as non-DAQmx data
 
 For instance, reading float64 data from a channel for scale index 1:
 
-```golang
+```go
 for value, err := range ch.ReadFloat64(ForDAQmxScaler(1)) {
     if err != nil {
         log.Fatal(err)
@@ -122,6 +122,42 @@ Our implemention of scaling is based on the fantastic [npTDMS](https://github.co
 By default, the read methods will apply any scaling that is found in the metadata. If you don't want this, you can specify `WithScaling(false)` as an option to your read function.
 
 **Bear in mind** that applying scaling can change the output data type (e.g. linear scaler will convert raw data types that are int32 to float64). If you are checking the output type, do so using the `ch.OutputType(options...)` method and pass your scaling option into that argument. (This will also handle cases where the data is DAQmx data, where an internal conversion to the actual data type is needed based on the input DAQmx scale index.)
+
+### Waveform
+
+The channels contain y value data. If you want to also get the x value data (usually time values, but not always), you can use `channel.Waveform()`. This will read the [standard waveform properties used by LabVIEW](https://www.ni.com/docs/en-US/bundle/labview-api-ref/page/functions/tdms-set-properties.html) to determine the x-axis values for your channel.
+
+```go
+waveform, err := ch.Waveform()
+if err != nil {
+    log.Fatal(err)
+}
+
+// Say I want to know what the x-axis value is for index 347:
+idx := 347
+xaxisValue := waveform.Value(idx)
+if err != nil {
+    log.Fatal(err)
+}
+
+// If I know I'm dealing with time-series data, I can creator a time waveform
+// which gives me time values:
+timeWaveform, err := waveform.AsWaveform()
+if err != nil {
+    log.Fatal(err)
+}
+
+// I can get the time as a time.Time for a specific index:
+timeValue := timeWaveform.Time(idx)
+
+// You can also iterate through waveform values:
+for ts := range timeWaveform.Times() {
+	fmt.Println(ts)
+}
+
+// Or you can pull all time values from the waveform:
+allTimes := timeWaveform.AllTimes()
+```
 
 ## Status
 

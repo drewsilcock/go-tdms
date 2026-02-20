@@ -154,10 +154,9 @@ func TestTimeWaveform_Time(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		index   uint
-		want    time.Time
-		wantErr string
+		name  string
+		index uint
+		want  time.Time
 	}{
 		{
 			name:  "first sample",
@@ -175,24 +174,15 @@ func TestTimeWaveform_Time(t *testing.T) {
 			want:  startTime.Add(4 * time.Millisecond),
 		},
 		{
-			name:    "index out of range",
-			index:   5,
-			wantErr: "index out of range",
+			name:  "beyond range extrapolates",
+			index: 10,
+			want:  startTime.Add(10 * time.Millisecond),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tw.Time(tt.index)
-			if tt.wantErr != "" {
-				if err == nil {
-					t.Fatalf("expected error %q, got nil", tt.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			got := tw.Time(tt.index)
 			if !got.Equal(tt.want) {
 				t.Errorf("expected %v, got %v", tt.want, got)
 			}
@@ -216,10 +206,7 @@ func TestTimeWaveform_Time_WithStartOffset(t *testing.T) {
 		t.Fatalf("unexpected error creating TimeWaveform: %v", err)
 	}
 
-	got, err := tw.Time(0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	got := tw.Time(0)
 
 	// First sample should be at startTime + 0.5s offset.
 	want := startTime.Add(500 * time.Millisecond)

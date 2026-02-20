@@ -27,7 +27,8 @@ type Waveform struct {
 
 // Value returns the value at the given index.
 //
-// If the index is outside the waveform range, this will return an error.
+// If the index is outside the waveform range, this will return an extrapolated
+// value.
 //
 // If this waveform is in time space, this will return number of nanoseconds
 // since Unix epoch, which can then be converted to a [time.Time] using
@@ -82,9 +83,7 @@ func (w Waveform) AsTimeWaveform() (TimeWaveform, error) {
 // a [Waveform] using [Waveform.AsTimeWaveform].
 //
 // Because all invariants are checked at construction time, [TimeWaveform.Time]
-// only performs a bounds check, and [TimeWaveform.Times] requires no error
-// handling at all. This makes TimeWaveform ideal for performance-critical code
-// that needs to resolve timestamps for millions of data points.
+// and [TimeWaveform.Times] require no error handling.
 type TimeWaveform struct {
 	startTime   time.Time
 	startOffset float64
@@ -94,16 +93,14 @@ type TimeWaveform struct {
 
 // Time returns the absolute time at the given sample index.
 //
-// Unlike [Waveform.Time], this method only performs a bounds check — the start
-// time and unit validations were already done when the TimeWaveform was created
-// via [Waveform.AsTimeWaveform].
-func (tw TimeWaveform) Time(index uint) (time.Time, error) {
-	if index >= tw.numSamples {
-		return time.Time{}, fmt.Errorf("index out of range")
-	}
-
+// This method performs no validation at all — the start time and unit checks
+// were already done when the TimeWaveform was created via
+// [Waveform.AsTimeWaveform]. Out-of-bounds indices will extrapolate beyond the
+// waveform's actual data range, which is well-defined mathematically but will
+// not correspond to a real sample in the TDMS file.
+func (tw TimeWaveform) Time(index uint) time.Time {
 	offset := tw.startOffset + (tw.increment * float64(index))
-	return tw.startTime.Add(time.Duration(offset * float64(time.Second))), nil
+	return tw.startTime.Add(time.Duration(offset * float64(time.Second)))
 }
 
 // Times returns an iterator over all timestamps in the waveform, one per
