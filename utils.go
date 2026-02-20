@@ -2,6 +2,10 @@ package tdms
 
 import "fmt"
 
+func ptr[T any](v T) *T {
+	return &v
+}
+
 func allocateBuffer(dataType DataType, size int) (any, error) {
 	switch dataType {
 	case DataTypeInt8:

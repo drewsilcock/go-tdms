@@ -82,6 +82,17 @@ func (pr Properties) GetString(name string, fallback ...string) (string, error) 
 	return prop.AsString()
 }
 
+func (pr Properties) GetTimestamp(name string, fallback ...Timestamp) (Timestamp, error) {
+	prop, ok := pr[name]
+	if !ok {
+		if len(fallback) > 0 {
+			return fallback[0], nil
+		}
+		return Timestamp{}, ErrPropertyNotFound
+	}
+	return prop.AsTimestamp()
+}
+
 func (pr Properties) Add(name string, value any) Properties {
 	prop := Property{
 		Name:  name,

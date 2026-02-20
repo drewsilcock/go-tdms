@@ -2,9 +2,11 @@ package tdms
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
+	"time"
 )
 
 // Channel represents a data channel within a [Group]. Use the Read methods
@@ -69,6 +71,58 @@ type dataChunk struct {
 // segments.
 func (ch *Channel) NumValues() uint64 {
 	return ch.totalNumValues
+}
+
+func (ch *Channel) Unit() string {
+	unit, _ := ch.Properties.GetString("unit_string")
+	return unit
+}
+
+func (ch *Channel) Waveform() (Waveform, error) {
+	xaxisName, err := ch.Properties.GetString("wf_name")
+	if err != nil {
+		return Waveform{}, fmt.Errorf("error getting waveform x-axis name: %w", err)
+	}
+
+	xaxisUnit, err := ch.Properties.GetString("wf_unit_string")
+	if err != nil {
+		return Waveform{}, fmt.Errorf("error getting waveform x-axis unit: %w", err)
+	}
+
+	numSamples, err := ch.Properties.GetUint("wf_samples")
+	if err != nil {
+		return Waveform{}, fmt.Errorf("error getting waveform number of samples: %w", err)
+	}
+
+	startOffset, err := ch.Properties.GetFloat("wf_start_offset")
+	if err != nil {
+		return Waveform{}, fmt.Errorf("error getting waveform start offset: %w", err)
+	}
+
+	increment, err := ch.Properties.GetFloat("wf_increment")
+	if err != nil {
+		return Waveform{}, fmt.Errorf("error getting waveform increment: %w", err)
+	}
+
+	var startTime *time.Time
+	startTimeVal, err := ch.Properties.GetTimestamp("wf_start_time")
+	if errors.Is(err, ErrPropertyNotFound) {
+		// This property is optional – that's fine.
+	} else if err != nil {
+		return Waveform{}, fmt.Errorf("error getting waveform start time: %w", err)
+	} else {
+		startTime = ptr(startTimeVal.AsTime())
+	}
+
+	return Waveform{
+		XAxisName:      xaxisName,
+		XAxisUnit:      xaxisUnit,
+		NumSamples:     uint(numSamples),
+		StartOffset:    startOffset,
+		StartTime:      startTime,
+		TimePreference: TimePreferenceNone,
+		increment:      increment,
+	}, nil
 }
 
 type readOptions struct {
