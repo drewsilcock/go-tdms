@@ -79,12 +79,9 @@ func (ch *Channel) Unit() string {
 }
 
 func (ch *Channel) Waveform() (Waveform, error) {
-	xaxisName, err := ch.Properties.GetString("wf_name")
-	if err != nil {
-		return Waveform{}, fmt.Errorf("error getting waveform x-axis name: %w", err)
-	}
+	xaxisName, _ := ch.Properties.GetString("wf_xname")
 
-	xaxisUnit, err := ch.Properties.GetString("wf_unit_string")
+	xaxisUnit, err := ch.Properties.GetString("unit_string")
 	if err != nil {
 		return Waveform{}, fmt.Errorf("error getting waveform x-axis unit: %w", err)
 	}

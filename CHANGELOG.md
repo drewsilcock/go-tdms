@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1 – 22nd February 2026
+
+🐛 Bug fixes:
+
+- Fix bug causing `Channel.Waveform()` to fail due to typo in x-axis property name.
+
 ## v0.3.0 – 20th February 2026
 
 ✨ Features:
