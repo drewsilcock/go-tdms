@@ -379,7 +379,11 @@ func (t *File) readSegmentMetadata(segmentOffset int64, leadIn *leadIn, prevSegm
 		totalRawDataSize = uint64(t.size) - rawDataAbsolutePosition
 	}
 
-	m.numChunks = totalRawDataSize / m.chunkSize
+	if m.chunkSize == 0 {
+		m.numChunks = 0
+	} else {
+		m.numChunks = totalRawDataSize / m.chunkSize
+	}
 
 	// Calculate the offset from the start of the segment to the first data
 	// point for the object, as well as the "stride" between successive data
